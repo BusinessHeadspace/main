@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pricing &amp; Profit Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- ======================================================================
+     MARKET-RATE BENCHMARKS  —  EDIT THIS SECTION
+     ----------------------------------------------------------------------
+     Minimum recommended hourly rates for bookkeepers, per currency.
+     These are PLACEHOLDER figures. Replace them with your real benchmarks
+     and update "lastReviewed" (YYYY-MM-DD) whenever you review them.
+     ====================================================================== -->
+<script id="market-benchmarks">
+const MARKET_BENCHMARKS = {
+  lastReviewed: "2026-10-29",
+  minHourlyRate: {
+    NZD: 85,  // PLACEHOLDER
+    AUD: 85,  // PLACEHOLDER
+    USD: 65,  // PLACEHOLDER
+    CAD: 70   // PLACEHOLDER
+  }
+};
+</script>
+<!-- ===================== END MARKET-RATE BENCHMARKS ===================== -->
+
+<style>
+  :root {
+    --navy: #073A59;
+    --blue: #2779A8;
+    --teal: #38B9C6;
+    --gold: #E8BB26;
+    --cream: #FBF8F1;
+    --white: #FFFFFF;
+    --text: #1F2D38;
+    --muted: #5F6F7A;
+    --line: #E4DFD2;
+    --green: #2E8B57;
+    --green-bg: #E5F4EA;
+    --amber: #B7791F;
+    --amber-bg: #FDF1D8;
+    --red: #C0392B;
+    --red-bg: #FBE4E1;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: 'Montserrat', Arial, sans-serif;
+    background: var(--cream);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  input, select, button { font-family: inherit; font-size: inherit; }
+  h1, h2, h3 { color: var(--navy); margin: 0; }
+  h1 { font-size: 1.9rem; font-weight: 700; }
+  h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1rem; }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  header.app {
+    display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+    gap: 16px; padding-bottom: 18px; margin-bottom: 24px;
+    border-bottom: 4px solid var(--teal);
+  }
+  header.app p { margin: 4px 0 0; color: var(--muted); }
+
+  .card {
+    background: var(--white);
+    border-radius: 12px;
+    padding: 22px;
+    margin-bottom: 22px;
+    box-shadow: 0 1px 3px rgba(7,58,89,.08);
+    border: 1px solid var(--line);
+  }
+
+  .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+  label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: .85rem; color: var(--navy); }
+  label.field span.hint { font-weight: 400; color: var(--muted); }
+  input[type=text], input[type=number], select {
+    padding: 9px 11px; border: 1.5px solid var(--line); border-radius: 8px;
+    background: var(--white); color: var(--text); width: 100%;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(56,185,198,.2); }
+
+  .btn {
+    border: none; border-radius: 8px; padding: 10px 16px; font-weight: 600; cursor: pointer;
+    transition: filter .15s, transform .05s;
+  }
+  .btn:hover { filter: brightness(.95); }
+  .btn:active { transform: translateY(1px); }
+  .btn-teal { background: var(--teal); color: var(--white); }
+  .btn-gold { background: var(--gold); color: var(--navy); }
+  .btn-outline { background: transparent; color: var(--navy); border: 1.5px solid var(--navy); }
+  .btn-remove {
+    background: transparent; border: none; color: var(--muted); cursor: pointer;
+    font-size: 1.2rem; line-height: 1; padding: 6px 8px; border-radius: 6px;
+  }
+  .btn-remove:hover { color: var(--red); background: var(--red-bg); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; }
+
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--navy); padding: 10px 8px; border-bottom: 2px solid var(--navy); white-space: nowrap;
+  }
+  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th.num, td.num { text-align: right; }
+  #clientTable input[type=text] { min-width: 230px; }
+  #clientTable input[type=number] { min-width: 100px; text-align: right; }
+  .empty { text-align: center; color: var(--muted); padding: 28px 8px; }
+
+  .status {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+    font-weight: 600; font-size: .85rem; white-space: nowrap;
+  }
+  .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .status.green { color: var(--green); background: var(--green-bg); }
+  .status.amber { color: var(--amber); background: var(--amber-bg); }
+  .status.red   { color: var(--red);   background: var(--red-bg); }
+  .status.none  { color: var(--muted); background: #F0EEE8; }
+  .needed { font-weight: 600; color: var(--navy); white-space: nowrap; }
+  .muted { color: var(--muted); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; font-size: .8rem; color: var(--muted); }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+  .stat { background: var(--cream); border-radius: 10px; padding: 14px 16px; border-left: 4px solid var(--blue); }
+  .stat .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  .stat .value { font-size: 1.4rem; font-weight: 700; color: var(--navy); margin-top: 2px; }
+  .stat .sub { font-size: .8rem; color: var(--muted); }
+  .stat.highlight { border-left-color: var(--gold); background: #FDF6DC; }
+  .stat.teal { border-left-color: var(--teal); }
+
+  .notice {
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;
+    background: #FDF6DC; border-left: 4px solid var(--gold); color: var(--navy);
+  }
+  .notice strong { display: block; margin-bottom: 4px; }
+  .success { background: var(--green-bg); border-left-color: var(--green); }
+
+  .fine-print { font-size: .72rem; color: var(--muted); margin-top: 14px; }
+  .print-only { display: none; }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 1.5rem; }
+    .card { padding: 16px; }
+  }
+
+  @media print {
+    @page { margin: 14mm; }
+    body { background: #fff; font-size: 11px; }
+    .wrap { max-width: none; padding: 0; }
+    .no-print { display: none !important; }
+    .print-only { display: block; }
+    .card { box-shadow: none; border: 1px solid #ccc; padding: 12px; margin-bottom: 12px; break-inside: avoid; }
+    #clientsCard { break-inside: auto; }
+    tr { break-inside: avoid; }
+    input, select {
+      border: none !important; padding: 0 !important; background: transparent !important;
+      box-shadow: none !important; -webkit-appearance: none; appearance: none; min-width: 0 !important;
+    }
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    .col-remove { display: none; }
+    .status, .stat, .notice { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    header.app { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="app">
+    <div>
+      <h1>Pricing &amp; Profit Calculator</h1>
+      <p>See which clients are paying what you're worth, and what repricing could earn you.</p>
+      <p class="print-only" id="printDate"></p>
+    </div>
+    <div class="toolbar no-print">
+      <button class="btn btn-gold" id="printBtn" type="button">Print / Save as PDF</button>
+    </div>
+  </header>
+
+  <!-- Settings -->
+  <section class="card">
+    <h2>Your targets</h2>
+    <div class="settings">
+      <label class="field">Target hourly rate
+        <input type="number" id="targetRate" min="0" step="1" placeholder="e.g. 95">
+      </label>
+      <label class="field">Currency
+        <select id="currency">
+          <option value="NZD">NZD – New Zealand dollar</option>
+          <option value="AUD">AUD – Australian dollar</option>
+          <option value="USD">USD – US dollar</option>
+          <option value="CAD">CAD – Canadian dollar</option>
+        </select>
+      </label>
+      <label class="field"><span>Desired annual income <span class="hint">(optional)</span></span>
+        <input type="number" id="desiredIncome" min="0" step="1000" placeholder="e.g. 120000">
+      </label>
+    </div>
+  </section>
+
+  <!-- Clients -->
+  <section class="card" id="clientsCard">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
+      <h2 style="margin:0;">Clients</h2>
+      <div class="toolbar no-print">
+        <button class="btn btn-teal" id="addClientBtn" type="button">+ Add client</button>
+        <button class="btn btn-outline" id="sampleBtn" type="button">Load sample data</button>
+        <button class="btn btn-outline" id="clearBtn" type="button">Clear all</button>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table id="clientTable">
+        <thead>
+          <tr>
+            <th>Client name</th>
+            <th class="num">Monthly fee</th>
+            <th class="num">Hours / month</th>
+            <th class="num">Effective rate</th>
+            <th>Rate check</th>
+            <th class="num">Fee needed for target</th>
+            <th class="col-remove no-print"><span class="sr-only" style="position:absolute;left:-9999px;">Remove</span></th>
+          </tr>
+        </thead>
+        <tbody id="clientRows"></tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span class="status green">At or above target</span>
+      <span class="status amber">Within 15% below</span>
+      <span class="status red">More than 15% below</span>
+    </div>
+  </section>
+
+  <!-- Summary -->
+  <section class="card">
+    <h2>Summary</h2>
+    <div class="summary-grid" id="summaryGrid"></div>
+  </section>
+
+  <!-- Repricing -->
+  <section class="card">
+    <h2>Repricing suggestions</h2>
+    <div id="benchmarkWarning"></div>
+    <div id="repricing"></div>
+    <p class="fine-print" id="benchmarkDate"></p>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "pricingProfitCalculator.v1";
+  const AMBER_BAND = 0.15; // within 15% below target = amber
+
+  const LOCALES = { NZD: "en-NZ", AUD: "en-AU", USD: "en-US", CAD: "en-CA" };
+
+  const SAMPLE = {
+    targetRate: 95,
+    currency: "NZD",
+    desiredIncome: 90000,
+    clients: [
+      { name: "Kowhai Plumbing Ltd",        fee: 650,  hours: 6 },
+      { name: "Harbourside Café",           fee: 420,  hours: 5 },
+      { name: "Tasman Landscaping",         fee: 380,  hours: 6 },
+      { name: "Pohutukawa Physiotherapy",   fee: 900,  hours: 9 },
+      { name: "Southern Alps Electrical",   fee: 550,  hours: 6.5 },
+      { name: "Ruru Design Studio",         fee: 300,  hours: 4.5 },
+      { name: "Kauri Coast Builders",       fee: 1200, hours: 12 },
+      { name: "Little Fern Early Learning", fee: 750,  hours: 8.5 },
+      { name: "Manuka Ridge Honey Co.",     fee: 480,  hours: 4 },
+      { name: "Bayview Motor Lodge",        fee: 520,  hours: 8 }
+    ]
+  };
+
+  let state = { targetRate: "", currency: "NZD", desiredIncome: "", clients: [] };
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    targetRate: $("targetRate"),
+    currency: $("currency"),
+    desiredIncome: $("desiredIncome"),
+    rows: $("clientRows"),
+    summary: $("summaryGrid"),
+    repricing: $("repricing"),
+    warning: $("benchmarkWarning"),
+    benchmarkDate: $("benchmarkDate")
+  };
+
+  // ---------- helpers ----------
+  const num = (v) => {
+    const n = parseFloat(v);
+    return isFinite(n) ? n : 0;
+  };
+
+  function money(v, decimals) {
+    const d = decimals === undefined ? 0 : decimals;
+    try {
+      return new Intl.NumberFormat(LOCALES[state.currency] || "en-NZ", {
+        style: "currency", currency: state.currency,
+        minimumFractionDigits: d, maximumFractionDigits: d
+      }).format(v);
+    } catch (e) {
+      return state.currency + " " + v.toFixed(d);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function formatDate(iso) {
+    const d = new Date(iso + "T00:00:00");
+    if (isNaN(d)) return iso;
+    return d.toLocaleDateString(LOCALES[state.currency] || "en-NZ", { day: "numeric", month: "long", year: "numeric" });
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.clients)) return parsed;
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  // ---------- calculations ----------
+  function analyse(client) {
+    const target = num(state.targetRate);
+    const fee = num(client.fee);
+    const hours = num(client.hours);
+    const rate = hours > 0 ? fee / hours : null;
+    let status = "none";
+    let neededFee = null;
+    if (rate !== null && target > 0) {
+      if (rate >= target) status = "green";
+      else if (rate >= target * (1 - AMBER_BAND)) status = "amber";
+      else status = "red";
+      if (rate < target) neededFee = target * hours;
+    }
+    return { fee, hours, rate, status, neededFee };
+  }
+
+  const STATUS_LABEL = { green: "On target", amber: "Slightly under", red: "Well under", none: "—" };
+
+  // ---------- rendering ----------
+  function renderRows() {
+    if (state.clients.length === 0) {
+      els.rows.innerHTML = '<tr><td colspan="7" class="empty">No clients yet. Click <strong>+ Add client</strong> or <strong>Load sample data</strong> to get started.</td></tr>';
+      return;
+    }
+    els.rows.innerHTML = state.clients.map((c, i) => `
+      <tr data-i="${i}">
+        <td><input type="text" data-field="name" value="${escapeHtml(c.name)}" placeholder="Client name" aria-label="Client name"></td>
+        <td class="num"><input type="number" data-field="fee" value="${c.fee}" min="0" step="10" aria-label="Monthly fee"></td>
+        <td class="num"><input type="number" data-field="hours" value="${c.hours}" min="0" step="0.5" aria-label="Hours per month"></td>
+        <td class="num" data-out="rate"></td>
+        <td data-out="status"></td>
+        <td class="num" data-out="needed"></td>
+        <td class="col-remove no-print"><button class="btn-remove" type="button" data-remove="${i}" title="Remove client" aria-label="Remove client">&times;</button></td>
+      </tr>`).join("");
+    updateRowOutputs();
+  }
+
+  function updateRowOutputs() {
+    els.rows.querySelectorAll("tr[data-i]").forEach((tr) => {
+      const a = analyse(state.clients[+tr.dataset.i]);
+      tr.querySelector('[data-out="rate"]').textContent = a.rate === null ? "—" : money(a.rate, 2);
+      tr.querySelector('[data-out="status"]').innerHTML = `<span class="status ${a.status}">${STATUS_LABEL[a.status]}</span>`;
+      tr.querySelector('[data-out="needed"]').innerHTML = a.neededFee === null
+        ? '<span class="muted">—</span>'
+        : `<span class="needed">${money(a.neededFee)}</span>`;
+    });
+  }
+
+  function renderSummary() {
+    let monthly = 0, hours = 0, extraMonthly = 0;
+    state.clients.forEach((c) => {
+      const a = analyse(c);
+      monthly += a.fee;
+      hours += a.hours;
+      if (a.neededFee !== null) extraMonthly += a.neededFee - a.fee;
+    });
+    const annual = monthly * 12;
+    const avgRate = hours > 0 ? monthly / hours : null;
+    const extraAnnual = extraMonthly * 12;
+    const desired = num(state.desiredIncome);
+
+    let html = `
+      <div class="stat"><div class="label">Monthly revenue</div><div class="value">${money(monthly)}</div></div>
+      <div class="stat"><div class="label">Annual revenue</div><div class="value">${money(annual)}</div></div>
+      <div class="stat"><div class="label">Total hours / month</div><div class="value">${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div><div class="sub">${(hours * 12).toLocaleString(undefined, { maximumFractionDigits: 0 })} hours / year</div></div>
+      <div class="stat teal"><div class="label">Average effective rate</div><div class="value">${avgRate === null ? "—" : money(avgRate, 2)}</div>${num(state.targetRate) > 0 ? `<div class="sub">Target: ${money(num(state.targetRate), 2)}</div>` : ""}</div>
+      <div class="stat highlight"><div class="label">Extra from repricing</div><div class="value">${money(extraAnnual)}</div><div class="sub">per year if all under-target clients are repriced</div></div>`;
+
+    if (desired > 0) {
+      const gap = desired - annual;
+      const afterRepricing = desired - (annual + extraAnnual);
+      let sub;
+      if (gap <= 0) sub = `You're ${money(-gap)} ahead of your ${money(desired)} goal`;
+      else if (afterRepricing <= 0) sub = `Repricing alone would close this gap`;
+      else sub = `Still ${money(afterRepricing)} short after repricing`;
+      html += `<div class="stat highlight"><div class="label">${gap > 0 ? "Gap to desired income" : "Above desired income"}</div><div class="value">${money(Math.abs(gap))}</div><div class="sub">${sub}</div></div>`;
+    }
+    els.summary.innerHTML = html;
+  }
+
+  function renderRepricing() {
+    const target = num(state.targetRate);
+    const benchmark = MARKET_BENCHMARKS.minHourlyRate[state.currency];
+
+    els.benchmarkDate.textContent = "Benchmarks reviewed " + formatDate(MARKET_BENCHMARKS.lastReviewed);
+
+    if (target > 0 && typeof benchmark === "number" && target < benchmark) {
+      els.warning.innerHTML = `<div class="notice">
+        <strong>Your target rate may be too low</strong>
+        Your target of ${money(target, 2)} per hour is below the market benchmark of ${money(benchmark, 2)} per hour for ${state.currency} bookkeepers.
+        Before repricing clients, consider lifting your target rate first. Otherwise the suggested fees below may still leave you undercharging.
+      </div>`;
+    } else {
+      els.warning.innerHTML = "";
+    }
+
+    if (!(target > 0)) {
+      els.repricing.innerHTML = '<p class="muted">Enter a target hourly rate to see repricing suggestions.</p>';
+      return;
+    }
+
+    const under = state.clients
+      .map((c) => ({ c, a: analyse(c) }))
+      .filter((x) => x.a.neededFee !== null)
+      .sort((x, y) => x.a.rate - y.a.rate);
+
+    if (state.clients.length === 0) {
+      els.repricing.innerHTML = '<p class="muted">Add some clients to see repricing suggestions.</p>';
+      return;
+    }
+    if (under.length === 0) {
+      els.repricing.innerHTML = '<div class="notice success"><strong>Great work!</strong>Every client is at or above your target rate.</div>';
+      return;
+    }
+
+    const rows = under.map(({ c, a }) => `
+      <tr>
+        <td>${escapeHtml(c.name || "Unnamed client")}</td>
+        <td><span class="status ${a.status}">${money(a.rate, 2)}</span></td>
+        <td class="num">${money(a.fee)}</td>
+        <td class="num"><span class="needed">${money(a.neededFee)}</span></td>
+        <td class="num">+${money(a.neededFee - a.fee)}</td>
+        <td class="num">+${money((a.neededFee - a.fee) * 12)}</td>
+      </tr>`).join("");
+
+    els.repricing.innerHTML = `
+      <p style="margin-top:0;">${under.length} client${under.length === 1 ? " is" : "s are"} below your target rate of ${money(target, 2)} per hour. Lowest effective rate first:</p>
+      <div class="table-scroll"><table>
+        <thead><tr>
+          <th>Client</th><th>Current rate</th><th class="num">Current fee</th>
+          <th class="num">Suggested fee</th><th class="num">Increase / month</th><th class="num">Increase / year</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  }
+
+  function renderOutputs() {
+    updateRowOutputs();
+    renderSummary();
+    renderRepricing();
+  }
+
+  function renderAll() {
+    els.targetRate.value = state.targetRate;
+    els.currency.value = state.currency;
+    els.desiredIncome.value = state.desiredIncome;
+    renderRows();
+    renderSummary();
+    renderRepricing();
+  }
+
+  // ---------- events ----------
+  els.targetRate.addEventListener("input", () => { state.targetRate = els.targetRate.value; save(); renderOutputs(); });
+  els.desiredIncome.addEventListener("input", () => { state.desiredIncome = els.desiredIncome.value; save(); renderOutputs(); });
+  els.currency.addEventListener("change", () => { state.currency = els.currency.value; save(); renderOutputs(); });
+
+  els.rows.addEventListener("input", (e) => {
+    const field = e.target.dataset.field;
+    const tr = e.target.closest("tr[data-i]");
+    if (!field || !tr) return;
+    state.clients[+tr.dataset.i][field] = e.target.value;
+    save();
+    renderOutputs();
+  });
+
+  els.rows.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-remove]");
+    if (!btn) return;
+    state.clients.splice(+btn.dataset.remove, 1);
+    save();
+    renderRows();
+    renderSummary();
+    renderRepricing();
+  });
+
+  $("addClientBtn").addEventListener("click", () => {
+    state.clients.push({ name: "", fee: "", hours: "" });
+    save();
+    renderRows();
+    renderSummary();
+    renderRepricing();
+    const inputs = els.rows.querySelectorAll('input[data-field="name"]');
+    if (inputs.length) inputs[inputs.length - 1].focus();
+  });
+
+  $("sampleBtn").addEventListener("click", () => {
+    if (state.clients.length && !confirm("Replace your current clients and targets with the sample data?")) return;
+    state = JSON.parse(JSON.stringify(SAMPLE));
+    save();
+    renderAll();
+  });
+
+  $("clearBtn").addEventListener("click", () => {
+    if (!confirm("Clear all clients and targets? This can't be undone.")) return;
+    state = { targetRate: "", currency: state.currency, desiredIncome: "", clients: [] };
+    save();
+    renderAll();
+  });
+
+  $("printBtn").addEventListener("click", () => window.print());
+  window.addEventListener("beforeprint", () => {
+    $("printDate").textContent = "Prepared " + new Date().toLocaleDateString(LOCALES[state.currency] || "en-NZ", { day: "numeric", month: "long", year: "numeric" });
+  });
+
+  // ---------- init ----------
+  const saved = load();
+  if (saved) state = Object.assign(state, saved);
+  renderAll();
+})();
+</script>
+</body>
+</html>
