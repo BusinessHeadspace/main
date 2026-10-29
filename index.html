@@ -60,7 +60,7 @@ const MARKET_BENCHMARKS = {
   h1 { font-size: 1.9rem; font-weight: 700; }
   h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1rem; }
 
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
 
   header.app {
     display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
@@ -111,8 +111,13 @@ const MARKET_BENCHMARKS = {
   }
   td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th.num, td.num { text-align: right; }
-  #clientTable input[type=text] { min-width: 230px; }
-  #clientTable input[type=number] { min-width: 100px; text-align: right; }
+  #clientTable input[type=text] { min-width: 200px; }
+  #clientTable input[type=number] { width: 84px; text-align: right; }
+  #clientTable th { white-space: normal; vertical-align: bottom; }
+  .gp { white-space: nowrap; font-weight: 600; color: var(--navy); }
+  .gp .pct { font-weight: 500; color: var(--muted); font-size: .85rem; margin-left: 4px; }
+  .gp.loss { color: var(--red); }
+  .table-note { font-size: .8rem; color: var(--muted); margin: 12px 0 0; }
   .empty { text-align: center; color: var(--muted); padding: 28px 8px; }
 
   .status {
@@ -129,13 +134,14 @@ const MARKET_BENCHMARKS = {
 
   .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; font-size: .8rem; color: var(--muted); }
 
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
   .stat { background: var(--cream); border-radius: 10px; padding: 14px 16px; border-left: 4px solid var(--blue); }
   .stat .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
   .stat .value { font-size: 1.4rem; font-weight: 700; color: var(--navy); margin-top: 2px; }
   .stat .sub { font-size: .8rem; color: var(--muted); }
   .stat.highlight { border-left-color: var(--gold); background: #FDF6DC; }
   .stat.teal { border-left-color: var(--teal); }
+  .stat.navy { border-left-color: var(--navy); }
 
   .notice {
     border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;
@@ -202,6 +208,9 @@ const MARKET_BENCHMARKS = {
           <option value="CAD">CAD – Canadian dollar</option>
         </select>
       </label>
+      <label class="field"><span>Team cost per hour <span class="hint">(wages + on-costs)</span></span>
+        <input type="number" id="teamCostRate" min="0" step="1" placeholder="e.g. 42">
+      </label>
       <label class="field"><span>Desired annual income <span class="hint">(optional)</span></span>
         <input type="number" id="desiredIncome" min="0" step="1000" placeholder="e.g. 120000">
       </label>
@@ -224,10 +233,13 @@ const MARKET_BENCHMARKS = {
           <tr>
             <th>Client name</th>
             <th class="num">Monthly fee</th>
-            <th class="num">Hours / month</th>
+            <th class="num">Total hours / month</th>
+            <th class="num">Team hours</th>
+            <th class="num">Other direct costs</th>
             <th class="num">Effective rate</th>
             <th>Rate check</th>
             <th class="num">Fee needed for target</th>
+            <th class="num">Gross profit / margin</th>
             <th class="col-remove no-print"><span class="sr-only" style="position:absolute;left:-9999px;">Remove</span></th>
           </tr>
         </thead>
@@ -239,6 +251,7 @@ const MARKET_BENCHMARKS = {
       <span class="status amber">Within 15% below</span>
       <span class="status red">More than 15% below</span>
     </div>
+    <p class="table-note"><strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs.</p>
   </section>
 
   <!-- Summary -->
@@ -269,27 +282,29 @@ const MARKET_BENCHMARKS = {
   const SAMPLE = {
     targetRate: 95,
     currency: "NZD",
-    desiredIncome: 90000,
+    teamCostRate: 42,
+    desiredIncome: 60000,
     clients: [
-      { name: "Kowhai Plumbing Ltd",        fee: 650,  hours: 6 },
-      { name: "Harbourside Café",           fee: 420,  hours: 5 },
-      { name: "Tasman Landscaping",         fee: 380,  hours: 6 },
-      { name: "Pohutukawa Physiotherapy",   fee: 900,  hours: 9 },
-      { name: "Southern Alps Electrical",   fee: 550,  hours: 6.5 },
-      { name: "Ruru Design Studio",         fee: 300,  hours: 4.5 },
-      { name: "Kauri Coast Builders",       fee: 1200, hours: 12 },
-      { name: "Little Fern Early Learning", fee: 750,  hours: 8.5 },
-      { name: "Manuka Ridge Honey Co.",     fee: 480,  hours: 4 },
-      { name: "Bayview Motor Lodge",        fee: 520,  hours: 8 }
+      { name: "Kowhai Plumbing Ltd",        fee: 650,  hours: 6,   teamHours: 4, otherCosts: 35 },
+      { name: "Harbourside Café",           fee: 420,  hours: 5,   teamHours: 3, otherCosts: 25 },
+      { name: "Tasman Landscaping",         fee: 380,  hours: 6,   teamHours: 5, otherCosts: 30 },
+      { name: "Pohutukawa Physiotherapy",   fee: 900,  hours: 9,   teamHours: 6, otherCosts: 45 },
+      { name: "Southern Alps Electrical",   fee: 550,  hours: 6.5, teamHours: 5, otherCosts: 35 },
+      { name: "Ruru Design Studio",         fee: 300,  hours: 4.5, teamHours: 0, otherCosts: 20 },
+      { name: "Kauri Coast Builders",       fee: 1200, hours: 12,  teamHours: 9, otherCosts: 60 },
+      { name: "Little Fern Early Learning", fee: 750,  hours: 8.5, teamHours: 6, otherCosts: 40 },
+      { name: "Manuka Ridge Honey Co.",     fee: 480,  hours: 4,   teamHours: 0, otherCosts: 25 },
+      { name: "Bayview Motor Lodge",        fee: 520,  hours: 8,   teamHours: 7, otherCosts: 30 }
     ]
   };
 
-  let state = { targetRate: "", currency: "NZD", desiredIncome: "", clients: [] };
+  let state = { targetRate: "", currency: "NZD", teamCostRate: "", desiredIncome: "", clients: [] };
 
   const $ = (id) => document.getElementById(id);
   const els = {
     targetRate: $("targetRate"),
     currency: $("currency"),
+    teamCostRate: $("teamCostRate"),
     desiredIncome: $("desiredIncome"),
     rows: $("clientRows"),
     summary: $("summaryGrid"),
@@ -314,6 +329,10 @@ const MARKET_BENCHMARKS = {
     } catch (e) {
       return state.currency + " " + v.toFixed(d);
     }
+  }
+
+  function pct(v) {
+    return (v * 100).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "%";
   }
 
   function escapeHtml(s) {
@@ -347,6 +366,9 @@ const MARKET_BENCHMARKS = {
     const fee = num(client.fee);
     const hours = num(client.hours);
     const rate = hours > 0 ? fee / hours : null;
+    const cost = num(client.teamHours) * num(state.teamCostRate) + num(client.otherCosts);
+    const grossProfit = fee - cost;
+    const margin = fee > 0 ? grossProfit / fee : null;
     let status = "none";
     let neededFee = null;
     if (rate !== null && target > 0) {
@@ -355,7 +377,7 @@ const MARKET_BENCHMARKS = {
       else status = "red";
       if (rate < target) neededFee = target * hours;
     }
-    return { fee, hours, rate, status, neededFee };
+    return { fee, hours, rate, status, neededFee, cost, grossProfit, margin };
   }
 
   const STATUS_LABEL = { green: "On target", amber: "Slightly under", red: "Well under", none: "—" };
@@ -363,17 +385,20 @@ const MARKET_BENCHMARKS = {
   // ---------- rendering ----------
   function renderRows() {
     if (state.clients.length === 0) {
-      els.rows.innerHTML = '<tr><td colspan="7" class="empty">No clients yet. Click <strong>+ Add client</strong> or <strong>Load sample data</strong> to get started.</td></tr>';
+      els.rows.innerHTML = '<tr><td colspan="10" class="empty">No clients yet. Click <strong>+ Add client</strong> or <strong>Load sample data</strong> to get started.</td></tr>';
       return;
     }
     els.rows.innerHTML = state.clients.map((c, i) => `
       <tr data-i="${i}">
-        <td><input type="text" data-field="name" value="${escapeHtml(c.name)}" placeholder="Client name" aria-label="Client name"></td>
-        <td class="num"><input type="number" data-field="fee" value="${c.fee}" min="0" step="10" aria-label="Monthly fee"></td>
-        <td class="num"><input type="number" data-field="hours" value="${c.hours}" min="0" step="0.5" aria-label="Hours per month"></td>
+        <td><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name"></td>
+        <td class="num"><input type="number" data-field="fee" value="${c.fee ?? ""}" min="0" step="10" aria-label="Monthly fee"></td>
+        <td class="num"><input type="number" data-field="hours" value="${c.hours ?? ""}" min="0" step="0.5" aria-label="Total hours per month"></td>
+        <td class="num"><input type="number" data-field="teamHours" value="${c.teamHours ?? ""}" min="0" step="0.5" aria-label="Team hours per month"></td>
+        <td class="num"><input type="number" data-field="otherCosts" value="${c.otherCosts ?? ""}" min="0" step="5" aria-label="Other direct costs per month"></td>
         <td class="num" data-out="rate"></td>
         <td data-out="status"></td>
         <td class="num" data-out="needed"></td>
+        <td class="num" data-out="gp"></td>
         <td class="col-remove no-print"><button class="btn-remove" type="button" data-remove="${i}" title="Remove client" aria-label="Remove client">&times;</button></td>
       </tr>`).join("");
     updateRowOutputs();
@@ -387,37 +412,46 @@ const MARKET_BENCHMARKS = {
       tr.querySelector('[data-out="needed"]').innerHTML = a.neededFee === null
         ? '<span class="muted">—</span>'
         : `<span class="needed">${money(a.neededFee)}</span>`;
+      tr.querySelector('[data-out="gp"]').innerHTML = a.fee > 0 || a.cost > 0
+        ? `<span class="gp${a.grossProfit < 0 ? " loss" : ""}">${money(a.grossProfit)}<span class="pct">${a.margin === null ? "" : pct(a.margin)}</span></span>`
+        : '<span class="muted">—</span>';
     });
   }
 
   function renderSummary() {
-    let monthly = 0, hours = 0, extraMonthly = 0;
+    let monthly = 0, hours = 0, extraMonthly = 0, costMonthly = 0;
     state.clients.forEach((c) => {
       const a = analyse(c);
       monthly += a.fee;
+      costMonthly += a.cost;
       hours += a.hours;
       if (a.neededFee !== null) extraMonthly += a.neededFee - a.fee;
     });
     const annual = monthly * 12;
     const avgRate = hours > 0 ? monthly / hours : null;
     const extraAnnual = extraMonthly * 12;
+    const costAnnual = costMonthly * 12;
+    const gpAnnual = annual - costAnnual;
+    const margin = annual > 0 ? gpAnnual / annual : null;
     const desired = num(state.desiredIncome);
 
     let html = `
       <div class="stat"><div class="label">Monthly revenue</div><div class="value">${money(monthly)}</div></div>
       <div class="stat"><div class="label">Annual revenue</div><div class="value">${money(annual)}</div></div>
+      <div class="stat navy"><div class="label">Cost of sales / year</div><div class="value">${money(costAnnual)}</div><div class="sub">${money(costMonthly)} / month</div></div>
+      <div class="stat navy"><div class="label">Gross profit / year</div><div class="value">${money(gpAnnual)}</div><div class="sub">${margin === null ? "&nbsp;" : pct(margin) + " gross margin"}</div></div>
       <div class="stat"><div class="label">Total hours / month</div><div class="value">${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div><div class="sub">${(hours * 12).toLocaleString(undefined, { maximumFractionDigits: 0 })} hours / year</div></div>
       <div class="stat teal"><div class="label">Average effective rate</div><div class="value">${avgRate === null ? "—" : money(avgRate, 2)}</div>${num(state.targetRate) > 0 ? `<div class="sub">Target: ${money(num(state.targetRate), 2)}</div>` : ""}</div>
-      <div class="stat highlight"><div class="label">Extra from repricing</div><div class="value">${money(extraAnnual)}</div><div class="sub">per year if all under-target clients are repriced</div></div>`;
+      <div class="stat highlight"><div class="label">Extra from repricing</div><div class="value">${money(extraAnnual)}</div><div class="sub">per year (revenue and gross profit) if all under-target clients are repriced</div></div>`;
 
     if (desired > 0) {
-      const gap = desired - annual;
-      const afterRepricing = desired - (annual + extraAnnual);
+      const gap = desired - gpAnnual;
+      const afterRepricing = desired - (gpAnnual + extraAnnual);
       let sub;
       if (gap <= 0) sub = `You're ${money(-gap)} ahead of your ${money(desired)} goal`;
-      else if (afterRepricing <= 0) sub = `Repricing alone would close this gap`;
+      else if (afterRepricing <= 0) sub = `Repricing alone would close it`;
       else sub = `Still ${money(afterRepricing)} short after repricing`;
-      html += `<div class="stat highlight"><div class="label">${gap > 0 ? "Gap to desired income" : "Above desired income"}</div><div class="value">${money(Math.abs(gap))}</div><div class="sub">${sub}</div></div>`;
+      html += `<div class="stat highlight"><div class="label">${gap > 0 ? "Gap to desired income" : "Above desired income"}</div><div class="value">${money(Math.abs(gap))}</div><div class="sub">Measured against gross profit. ${sub}.</div></div>`;
     }
     els.summary.innerHTML = html;
   }
@@ -487,6 +521,7 @@ const MARKET_BENCHMARKS = {
   function renderAll() {
     els.targetRate.value = state.targetRate;
     els.currency.value = state.currency;
+    els.teamCostRate.value = state.teamCostRate ?? "";
     els.desiredIncome.value = state.desiredIncome;
     renderRows();
     renderSummary();
@@ -496,6 +531,7 @@ const MARKET_BENCHMARKS = {
   // ---------- events ----------
   els.targetRate.addEventListener("input", () => { state.targetRate = els.targetRate.value; save(); renderOutputs(); });
   els.desiredIncome.addEventListener("input", () => { state.desiredIncome = els.desiredIncome.value; save(); renderOutputs(); });
+  els.teamCostRate.addEventListener("input", () => { state.teamCostRate = els.teamCostRate.value; save(); renderOutputs(); });
   els.currency.addEventListener("change", () => { state.currency = els.currency.value; save(); renderOutputs(); });
 
   els.rows.addEventListener("input", (e) => {
@@ -536,7 +572,7 @@ const MARKET_BENCHMARKS = {
 
   $("clearBtn").addEventListener("click", () => {
     if (!confirm("Clear all clients and targets? This can't be undone.")) return;
-    state = { targetRate: "", currency: state.currency, desiredIncome: "", clients: [] };
+    state = { targetRate: "", currency: state.currency, teamCostRate: "", desiredIncome: "", clients: [] };
     save();
     renderAll();
   });
