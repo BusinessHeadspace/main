@@ -34,8 +34,8 @@ def base(src, title):
             f'<title>{title}</title>\n<meta name="claude:viewport-fit-sides" content="cover">')
     s = rep(s, '</head>\n<body>\n', '')
     s = rep(s, '</body>\n</html>\n', '')
-    s = rep(s, '.wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }',
-            '.wrap { max-width: 1280px; margin: 0 auto; padding-block: 24px 48px; '
+    s = rep(s, '.wrap { max-width: 1440px; margin: 0 auto; padding: 24px 16px 48px; }',
+            '.wrap { max-width: 1440px; margin: 0 auto; padding-block: 24px 48px; '
             'padding-left: max(16px, env(safe-area-inset-left, 0px)); '
             'padding-right: max(16px, env(safe-area-inset-right, 0px)); }')
     # No print dialog or downloads in the viewer

@@ -8,7 +8,8 @@
 
   const SERVER = "Xero";
   const OWNER_PAY = /shareholder'?s? salar|owner'?s? (salary|wages|pay)|director'?s? (fees|salary)|drawings|proprietor/i;
-  const NOT_FEES = /subs|commission|course|affiliate|reimburs|travel|music|interest|other revenue/i;
+  const NOT_FEES = /subs|commission|affiliate|reimburs|travel|music|interest|other revenue/i;
+  const COURSES = /course|programme|program|membership|product/i;
 
   const $ = (id) => document.getElementById(id);
   const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
@@ -201,6 +202,16 @@
     return [...codes.values()].sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
   }
 
+  // Course sales count as revenue (grouped as Courses & programmes). Added once to an
+  // earlier saved choice that left them out.
+  function addCourseAccounts(x) {
+    if (saved.sync.coursesAdded || !saved.sync.feeCodes) return;
+    const set = new Set(saved.sync.feeCodes);
+    invoiceAccounts(x).filter((a) => a.type === "REVENUE" && COURSES.test(a.name)).forEach((a) => set.add(a.code));
+    saved.sync.feeCodes = [...set];
+    saved.sync.coursesAdded = true;
+  }
+
   function defaultFeeCodes(x) {
     return invoiceAccounts(x).filter((a) => a.type === "REVENUE" && !NOT_FEES.test(a.name)).map((a) => a.code);
   }
@@ -216,34 +227,67 @@
       .reduce((t, a) => t + (owner.has(a.account_name) ? num(a.current_balance) : 0), 0);
   }
 
-  // Client fees and hours from invoice lines in the window
+  // Which service an income account belongs to
+  function serviceFromAccount(name) {
+    if (COURSES.test(name)) return "course";
+    if (/coach/i.test(name)) return "coaching";
+    if (/consult|support|training|software|advis/i.test(name)) return "consulting";
+    if (/bookkeep|accounts|payroll|compliance/i.test(name)) return "bookkeeping";
+    return "other";
+  }
+
+  const monthName = (ym) => new Date(ym + "-01T00:00:00").toLocaleDateString("en-NZ", { month: "short", year: "numeric" });
+
+  // Client fees and hours from invoice lines in the window.
+  // Regular clients are averaged over the months they were billed, so a month off
+  // doesn't drag the average down; ad hoc clients over the whole period.
   function clientsFrom(x) {
     const fee = new Set(saved.sync.feeCodes || []);
     const hidden = new Set(saved.sync.hidden.map((h) => h.id));
+    const names = new Map(x.accounts.map((a) => [a.code, a.name]));
     const end = new Date(x.winEnd + "T00:00:00");
+    const lastMonth = x.winEnd.slice(0, 7);
     const by = new Map();
     x.invoices.forEach((inv) => {
       const cid = inv.contact && inv.contact.contact_id;
       if (!cid || hidden.has(cid)) return;
       const lines = (inv.line_items || []).filter((l) => fee.has(l.account_code) && l.line_amount_net_base_currency != null);
       if (!lines.length) return;
-      const c = by.get(cid) || { id: cid, name: inv.contact.name, total: 0, qty: 0, hourly: false, first: inv.invoice_date };
+      const c = by.get(cid) || { id: cid, name: inv.contact.name, total: 0, qty: 0, hourly: false, first: inv.invoice_date, last: inv.invoice_date, months: new Set(), bySvc: {} };
       lines.forEach((l) => {
-        c.total += num(l.line_amount_net_base_currency);
+        const amt = num(l.line_amount_net_base_currency);
+        c.total += amt;
+        const svc = serviceFromAccount(names.get(l.account_code) || "");
+        c.bySvc[svc] = (c.bySvc[svc] || 0) + amt;
         const q = num(l.quantity);
         c.qty += q;
         if (l.quantity != null && q !== 1) c.hourly = true;
       });
       if (inv.invoice_date < c.first) c.first = inv.invoice_date;
+      if (inv.invoice_date > c.last) c.last = inv.invoice_date;
+      c.months.add(inv.invoice_date.slice(0, 7));
       by.set(cid, c);
     });
     return [...by.values()].filter((c) => c.total > 0).map((c) => {
       const f = new Date(c.first + "T00:00:00");
       const active = Math.max(1, Math.min(x.months, (end.getFullYear() - f.getFullYear()) * 12 + end.getMonth() - f.getMonth() + 1));
+      const billed = c.months.size;
+      const regular = billed >= 2 ? billed >= Math.ceil(active * 0.5) : active <= 1;
+      const per = regular ? billed : x.months;
+      const type = Object.keys(c.bySvc).sort((a, b) => c.bySvc[b] - c.bySvc[a])[0] || "other";
+      let note = "", warn = false;
+      if (!regular) {
+        note = `Ad hoc: billed ${money(c.total)} in ${billed} of the last ${x.months} months. Shown as a monthly average.`;
+      } else if (c.last.slice(0, 7) < lastMonth) {
+        note = `Last billed ${monthName(c.last.slice(0, 7))}. If they've finished, remove them with ×.`;
+        warn = true;
+      } else if (billed < active) {
+        note = `Averaged over the ${billed} months billed (not billed in ${active - billed}).`;
+      }
       return {
-        id: c.id, name: c.name,
-        fee: Math.round(c.total / active),
-        hours: c.hourly ? Math.round(c.qty / active * 100) / 100 : ""
+        id: c.id, name: c.name, type, note, noteWarn: warn,
+        fee: Math.round(c.total / per),
+        hours: c.hourly ? Math.round(c.qty / per * 100) / 100 : ""
       };
     }).sort((a, b) => b.fee - a.fee);
   }
@@ -256,14 +300,20 @@
     const prev = s.clients || [];
     const byId = new Map(prev.filter((c) => c.xeroContactId).map((c) => [c.xeroContactId, c]));
     const byName = new Map(prev.map((c) => [String(c.name || "").trim().toLowerCase(), c]));
+    const changed = (mine, theirs) => mine !== undefined && mine !== "" && theirs !== undefined && String(mine) !== String(theirs);
     const fresh = clientsFrom(x).map((xc) => {
       const old = byId.get(xc.id) || byName.get(xc.name.toLowerCase()) || {};
       const youChangedHours = old.hours !== undefined && old.hours !== "" && String(old.hours) !== String(old.xeroHours ?? "");
+      const youChangedFee = old.xeroFee !== undefined && Math.round(num(old.fee)) !== Math.round(num(old.xeroFee));
       return {
-        name: xc.name, fee: xc.fee,
+        name: changed(old.name, old.xeroName) ? old.name : xc.name, xeroName: xc.name,
+        type: changed(old.type, old.xeroType) ? old.type : xc.type, xeroType: xc.type,
+        fee: youChangedFee ? old.fee : xc.fee, xeroFee: xc.fee, origFee: xc.fee, origLabel: "Xero",
         hours: youChangedHours ? old.hours : (xc.hours !== "" ? xc.hours : (old.hours ?? "")),
         xeroHours: xc.hours,
-        teamHours: old.teamHours ?? "", otherCosts: old.otherCosts ?? "",
+        teamHours: old.teamHours ?? "", otherCosts: old.otherCosts ?? "", wip: old.wip ?? "",
+        noReprice: !!old.noReprice,
+        note: xc.note, noteWarn: xc.noteWarn,
         source: "xero", xeroContactId: xc.id
       };
     });
@@ -284,7 +334,8 @@
       if (!(num(s.pt.netProfit) > 0)) s.pt.netProfit = String(Math.round(num(p.net_profit) + owner));
     }
     if (!s.currency) s.currency = "NZD";
-    s.dataNote = `Live from Xero (${x.orgName}). Overheads and gross profit % come from the year to ${new Date(x.lastEnd + "T00:00:00").toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" })}. Client fees are monthly averages from invoices issued over the last ${x.months} full months, excluding GST. Hours come from invoice quantities where you bill by the hour.`;
+    s.periodMonths = x.months;
+    s.dataNote = `Live from Xero (${x.orgName}). Overheads and gross profit % come from the year to ${new Date(x.lastEnd + "T00:00:00").toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" })}. Client fees come from invoices over the last ${x.months} full months, excluding GST: regular clients averaged over the months they were billed, ad hoc clients over the whole period. Fees, hours and services you change stay as you set them.`;
     window.PPC.setState(s);
   }
 
@@ -299,6 +350,7 @@
       x.refreshedAt = Date.now();
       saved.xero = x;
       if (!saved.sync.feeCodes) saved.sync.feeCodes = defaultFeeCodes(x);
+      addCourseAccounts(x);
       if (!saved.sync.ownerAccounts) saved.sync.ownerAccounts = expenseLines(x).filter((n) => OWNER_PAY.test(n));
       applyXero();
       renderHeader();
@@ -425,6 +477,11 @@
       }
     }
     if (!store) say("Your settings are kept in this browser only.", false);
+    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && c.xeroType === undefined)) {
+      addCourseAccounts(saved.xero);
+      applyXero();
+      persist();
+    }
     $("xeroRefresh").disabled = !mcp;
     renderHeader();
     renderSettings();

@@ -52,6 +52,8 @@ const CAPACITY_GUIDE = {
     --amber-bg: #FDF1D8;
     --red: #C0392B;
     --red-bg: #FBE4E1;
+    --great: #FFFFFF;
+    --great-bg: #1E6B43;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
@@ -67,7 +69,7 @@ const CAPACITY_GUIDE = {
   h1 { font-size: 1.9rem; font-weight: 700; }
   h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1rem; }
 
-  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
+  .wrap { max-width: 1440px; margin: 0 auto; padding: 24px 16px 48px; }
 
   header.app {
     display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
@@ -118,8 +120,25 @@ const CAPACITY_GUIDE = {
   }
   td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th.num, td.num { text-align: right; }
-  #clientTable input[type=text] { min-width: 200px; }
-  #clientTable input[type=number] { width: 84px; text-align: right; }
+  #clientTable input[data-field="name"] { min-width: 170px; }
+  #clientTable input.calc { width: 70px; text-align: right; padding: 8px 7px; }
+  #clientTable select { padding: 7px 4px; font-size: .82rem; width: 112px; }
+  #clientTable td, #clientTable th { padding-left: 5px; padding-right: 5px; }
+  #clientTable tr.group td { background: var(--cream); font-weight: 700; color: var(--navy); border-top: 2px solid var(--line); }
+  #clientTable tr.group td.num { font-variant-numeric: tabular-nums; }
+  .row-note { font-size: .75rem; color: var(--muted); margin-top: 3px; max-width: 280px; line-height: 1.35; }
+  .row-note.warn { color: var(--amber); font-weight: 600; }
+  .reset-fee { display: block; margin-top: 3px; font-size: .72rem; white-space: nowrap; }
+  .mini-stats { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 16px; font-size: .88rem; color: var(--muted); }
+  .mini-stats strong { color: var(--navy); }
+  tr.skipped td { opacity: .5; }
+  tr.skipped td:last-child { opacity: 1; }
+  .plan-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .plan-table input.calc { width: 90px; text-align: right; }
+  .plan-table input[type=text]:not(.calc) { width: 180px; }
+  .plan-table .amt { text-align: right; font-weight: 600; color: var(--navy); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .plan-table tr.total td { border-top: 2px solid var(--navy); border-bottom: none; font-weight: 700; color: var(--navy); }
+  .calc-tip { font-size: .75rem; color: var(--muted); margin: 10px 0 0; }
   #clientTable th { white-space: normal; vertical-align: bottom; }
   .gp { white-space: nowrap; font-weight: 600; color: var(--navy); }
   .gp .pct { font-weight: 500; color: var(--muted); font-size: .85rem; margin-left: 4px; }
@@ -136,6 +155,8 @@ const CAPACITY_GUIDE = {
   .status.amber { color: var(--amber); background: var(--amber-bg); }
   .status.red   { color: var(--red);   background: var(--red-bg); }
   .status.none  { color: var(--muted); background: #F0EEE8; }
+  .status.great { color: var(--great); background: var(--great-bg); }
+  .status.product { color: var(--blue); background: #E3EFF7; }
   .needed { font-weight: 600; color: var(--navy); white-space: nowrap; }
   .muted { color: var(--muted); }
 
@@ -310,8 +331,8 @@ const CAPACITY_GUIDE = {
   <section class="card">
     <h2>Your settings</h2>
     <div class="settings">
-      <label class="field">Target hourly rate
-        <input type="number" id="targetRate" min="0" step="1" placeholder="e.g. 95">
+      <label class="field">Overall target hourly rate
+        <input class="calc" type="text" inputmode="decimal" id="targetRate" placeholder="e.g. 95">
       </label>
       <label class="field">Currency
         <select id="currency">
@@ -322,9 +343,22 @@ const CAPACITY_GUIDE = {
         </select>
       </label>
       <label class="field"><span>Team cost per hour <span class="hint">(wages + on-costs)</span></span>
-        <input type="number" id="teamCostRate" min="0" step="1" placeholder="e.g. 42">
+        <input class="calc" type="text" inputmode="decimal" id="teamCostRate" placeholder="e.g. 42">
       </label>
     </div>
+    <p class="table-note" style="margin:16px 0 8px;"><strong>Target rate by service</strong> (optional). Leave blank to use the overall rate. The overall rate is also what the Profit target uses.</p>
+    <div class="settings">
+      <label class="field">Coaching
+        <input class="calc" type="text" inputmode="decimal" id="rateCoaching" placeholder="Same as overall">
+      </label>
+      <label class="field">Consulting
+        <input class="calc" type="text" inputmode="decimal" id="rateConsulting" placeholder="Same as overall">
+      </label>
+      <label class="field">Bookkeeping
+        <input class="calc" type="text" inputmode="decimal" id="rateBookkeeping" placeholder="Same as overall">
+      </label>
+    </div>
+    <p class="calc-tip no-print">Tip: any number box works as a calculator. Type a sum like 3.5+2.25 or 12*1.5 and press Enter.</p>
   </section>
 
   <nav class="tabs no-print" role="tablist" aria-label="Calculator sections">
@@ -347,24 +381,24 @@ const CAPACITY_GUIDE = {
             </div>
           </div>
           <label class="field"><span>Net profit you want <span class="hint">(before tax)</span></span>
-            <input type="number" id="ptNetProfit" min="0" step="1000" placeholder="e.g. 60000">
+            <input class="calc" type="text" inputmode="decimal" id="ptNetProfit" placeholder="e.g. 60000">
           </label>
           <label class="field"><span>Overheads <span class="hint">(expenses from your Budget, not cost of sales)</span></span>
-            <input type="number" id="ptOverheads" min="0" step="500" placeholder="e.g. 18000">
+            <input class="calc" type="text" inputmode="decimal" id="ptOverheads" placeholder="e.g. 18000">
           </label>
           <label class="field"><span>Target gross profit % <span class="hint">(100% if it's just you)</span></span>
-            <input type="number" id="ptGpPct" min="1" max="100" step="1" placeholder="e.g. 60">
+            <input class="calc" type="text" inputmode="decimal" id="ptGpPct" placeholder="e.g. 60">
             <button type="button" class="link-btn no-print" id="ptUseMargin" hidden></button>
           </label>
           <div class="field" style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:.85rem;color:var(--navy);">
-            Hourly rate <span class="hint" style="font-weight:400;color:var(--muted);">Your target hourly rate from Your settings above</span>
+            Hourly rate <span class="hint" style="font-weight:400;color:var(--muted);">Your overall target hourly rate from Your settings above</span>
             <div class="readout" id="ptRateReadout">—</div>
           </div>
           <label class="field"><span>People doing billable work <span class="hint">(including you)</span></span>
-            <input type="number" id="ptPeople" min="1" step="1" placeholder="e.g. 2">
+            <input class="calc" type="text" inputmode="decimal" id="ptPeople" placeholder="e.g. 2">
           </label>
           <label class="field"><span>Working weeks per year <span class="hint">(52 matches the course spreadsheet; allow for leave and public holidays)</span></span>
-            <input type="number" id="ptWeeks" min="1" max="52" step="1" placeholder="52">
+            <input class="calc" type="text" inputmode="decimal" id="ptWeeks" placeholder="52">
           </label>
         </div>
         <div>
@@ -414,10 +448,12 @@ const CAPACITY_GUIDE = {
         <thead>
           <tr>
             <th>Client name</th>
+            <th>Service</th>
             <th class="num">Monthly fee</th>
             <th class="num">Total hours / month</th>
             <th class="num">Team hours</th>
             <th class="num">Other direct costs</th>
+            <th class="num">WIP $ (unbilled)</th>
             <th class="num">Effective rate</th>
             <th>Rate check</th>
             <th class="num">Fee needed for target</th>
@@ -429,17 +465,18 @@ const CAPACITY_GUIDE = {
       </table>
     </div>
     <div class="legend">
+      <span class="status great">More than 15% above</span>
       <span class="status green">At or above target</span>
       <span class="status amber">Within 15% below</span>
       <span class="status red">More than 15% below</span>
     </div>
-    <p class="table-note"><strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs.</p>
+    <p class="table-note"><strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses and programmes don't need hours.</p>
   </section>
 
   <!-- Summary -->
   <section class="card">
     <h2>Summary</h2>
-    <div class="summary-grid" id="summaryGrid"></div>
+    <div id="summaryGrid"></div>
   </section>
 
   <!-- Repricing -->
@@ -448,6 +485,12 @@ const CAPACITY_GUIDE = {
     <div id="benchmarkWarning"></div>
     <div id="repricing"></div>
     <p class="fine-print" id="benchmarkDate"></p>
+  </section>
+
+  <!-- Fill the gap -->
+  <section class="card" id="planCard">
+    <h2>Fill the gap</h2>
+    <div id="plan"></div>
   </section>
   </div>
 
@@ -482,7 +525,20 @@ const CAPACITY_GUIDE = {
   };
 
   const emptyPt = () => ({ basis: "year", netProfit: "", overheads: "", gpPct: "", people: "", weeks: "" });
-  let state = { targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] };
+  const emptyRates = () => ({ coaching: "", consulting: "", bookkeeping: "" });
+  const emptyPlan = () => ({ reprice: true, wip: true, n: {}, fee: {}, courses: "", coursePrice: "", otherLabel: "", other: "" });
+  let state = { targetRate: "", currency: "NZD", teamCostRate: "", typeRates: emptyRates(), plan: emptyPlan(), pt: emptyPt(), clients: [] };
+
+  const SERVICES = [
+    { id: "coaching", label: "Coaching" },
+    { id: "consulting", label: "Consulting" },
+    { id: "bookkeeping", label: "Bookkeeping" },
+    { id: "course", label: "Courses & programmes" },
+    { id: "other", label: "Other" }
+  ];
+  const serviceOf = (c) => (SERVICES.some((x) => x.id === c.type) ? c.type : "");
+  const serviceLabel = (id) => (SERVICES.find((x) => x.id === id) || { label: "Not grouped yet" }).label;
+  const COLS = 13;
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -491,6 +547,7 @@ const CAPACITY_GUIDE = {
     teamCostRate: $("teamCostRate"),
     rows: $("clientRows"),
     summary: $("summaryGrid"),
+    plan: $("plan"),
     repricing: $("repricing"),
     warning: $("benchmarkWarning"),
     benchmarkDate: $("benchmarkDate")
@@ -498,9 +555,31 @@ const CAPACITY_GUIDE = {
 
   // ---------- helpers ----------
   const num = (v) => {
-    const n = parseFloat(v);
+    const n = parseFloat(String(v ?? "").replace(/[,$\s]/g, ""));
     return isFinite(n) ? n : 0;
   };
+
+  // Calculator for number boxes: "3.5+2", "12*1.5", "(400-50)/2" -> number; null if not a sum
+  function evalSum(src) {
+    const t = String(src ?? "").replace(/^=/, "").replace(/[\s$,]/g, "").replace(/×/g, "*").replace(/÷/g, "/");
+    if (!/^[-+*/().\d]+$/.test(t) || !/[-+*/]/.test(t.replace(/^-/, ""))) return null;
+    let i = 0;
+    const factor = () => {
+      if (t[i] === "-") { i++; return -factor(); }
+      if (t[i] === "+") { i++; return factor(); }
+      if (t[i] === "(") { i++; const v = expr(); if (t[i++] !== ")") throw new Error("bracket"); return v; }
+      const m = t.slice(i).match(/^(\d+(\.\d*)?|\.\d+)/);
+      if (!m) throw new Error("number");
+      i += m[0].length;
+      return parseFloat(m[0]);
+    };
+    const term = () => { let v = factor(); while (t[i] === "*" || t[i] === "/") { const op = t[i++]; const r = factor(); v = op === "*" ? v * r : v / r; } return v; };
+    const expr = () => { let v = term(); while (t[i] === "+" || t[i] === "-") { const op = t[i++]; const r = term(); v = op === "+" ? v + r : v - r; } return v; };
+    try {
+      const v = expr();
+      return i === t.length && isFinite(v) ? Math.round(v * 100) / 100 : null;
+    } catch (e) { return null; }
+  }
 
   function money(v, decimals) {
     const d = decimals === undefined ? 0 : decimals;
@@ -541,6 +620,8 @@ const CAPACITY_GUIDE = {
   function loadData(d) {
     state = Object.assign({ targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] }, d);
     state.pt = Object.assign(emptyPt(), d.pt || {});
+    state.typeRates = Object.assign(emptyRates(), d.typeRates || {});
+    state.plan = Object.assign(emptyPlan(), d.plan || {});
     delete state.pt.taxRate;
     if (!Array.isArray(state.clients)) state.clients = [];
     if (!LOCALES[state.currency]) state.currency = "NZD";
@@ -560,37 +641,53 @@ const CAPACITY_GUIDE = {
   }
 
   // ---------- calculations ----------
+  function targetFor(c) {
+    const t = num((state.typeRates || {})[c.type]);
+    return t > 0 ? t : num(state.targetRate);
+  }
+
   function analyse(client) {
-    const target = num(state.targetRate);
+    const target = targetFor(client);
     const fee = num(client.fee);
+    const wip = num(client.wip);
+    const wipMonthly = wip / Math.max(1, num(state.periodMonths) || 1);
+    const revenue = fee + wipMonthly;
     const hours = num(client.hours);
-    const rate = hours > 0 ? fee / hours : null;
+    const isProduct = client.type === "course";
+    const rate = hours > 0 && !isProduct ? revenue / hours : null;
     const cost = num(client.teamHours) * num(state.teamCostRate) + num(client.otherCosts);
-    const grossProfit = fee - cost;
-    const margin = fee > 0 ? grossProfit / fee : null;
-    let status = "none";
+    const grossProfit = revenue - cost;
+    const margin = revenue > 0 ? grossProfit / revenue : null;
+    let status = isProduct ? "product" : "none";
     let neededFee = null;
     if (rate !== null && target > 0) {
-      if (rate >= target) status = "green";
+      if (rate >= target * (1 + AMBER_BAND)) status = "great";
+      else if (rate >= target) status = "green";
       else if (rate >= target * (1 - AMBER_BAND)) status = "amber";
       else status = "red";
-      if (rate < target) neededFee = target * hours;
+      if (rate < target) neededFee = target * hours - wipMonthly;
     }
-    return { fee, hours, rate, status, neededFee, cost, grossProfit, margin };
+    const skipped = !!client.noReprice;
+    const extra = neededFee !== null && !skipped ? neededFee - fee : 0;
+    const missingHours = !isProduct && revenue > 0 && !(hours > 0);
+    return { fee, wip, wipMonthly, revenue, hours, rate, target, status, neededFee, extra, skipped, cost, grossProfit, margin, isProduct, missingHours };
   }
 
   // Totals across the client list (monthly figures)
   function clientTotals() {
-    const t = { revenue: 0, hours: 0, cost: 0, extra: 0, count: 0, missing: 0 };
+    const t = { revenue: 0, hours: 0, cost: 0, extra: 0, count: 0, missing: 0, wip: 0, rateRevenue: 0, rateHours: 0 };
     state.clients.forEach((c) => {
       const a = analyse(c);
-      if (a.fee > 0 && !(a.hours > 0)) t.missing++;
+      if (a.missingHours) t.missing++;
       t.revenue += a.fee;
+      t.wip += a.wip;
       t.hours += a.hours;
       t.cost += a.cost;
-      if (a.neededFee !== null) t.extra += a.neededFee - a.fee;
+      t.extra += a.extra;
+      if (a.rate !== null) { t.rateRevenue += a.revenue; t.rateHours += a.hours; }
       if (a.fee > 0) t.count++;
     });
+    t.avgRate = t.rateHours > 0 ? t.rateRevenue / t.rateHours : null;
     return t;
   }
 
@@ -620,84 +717,132 @@ const CAPACITY_GUIDE = {
     };
   }
 
-  const STATUS_LABEL = { green: "On target", amber: "Slightly under", red: "Well under", none: "—" };
+  const STATUS_LABEL = { great: "Well over", green: "On target", amber: "Slightly under", red: "Well under", product: "Course / product", none: "—" };
+
+  // Per-service figures (monthly) for group subtotals and the gap planner
+  function serviceStats(id) {
+    const g = { count: 0, fee: 0, hours: 0, wip: 0, rateRevenue: 0, rateHours: 0, feeCount: 0, hoursCount: 0 };
+    state.clients.forEach((c) => {
+      if (serviceOf(c) !== id) return;
+      const a = analyse(c);
+      g.count++;
+      g.fee += a.fee;
+      g.hours += a.hours;
+      g.wip += a.wip;
+      if (a.fee > 0) g.feeCount++;
+      if (a.hours > 0) g.hoursCount++;
+      if (a.rate !== null) { g.rateRevenue += a.revenue; g.rateHours += a.hours; }
+    });
+    g.rate = g.rateHours > 0 ? g.rateRevenue / g.rateHours : null;
+    g.avgFee = g.feeCount ? g.fee / g.feeCount : 0;
+    g.avgHours = g.hoursCount ? g.hours / g.hoursCount : 0;
+    return g;
+  }
 
   // ---------- rendering ----------
-  function renderRows() {
-    if (state.clients.length === 0) {
-      els.rows.innerHTML = '<tr><td colspan="10" class="empty">No clients yet. Click <strong>+ Add client</strong> or <strong>Load sample data</strong> to get started.</td></tr>';
-      return;
-    }
-    els.rows.innerHTML = state.clients.map((c, i) => `
+  function numInput(field, value, label) {
+    return `<input class="calc" type="text" inputmode="decimal" data-field="${field}" value="${escapeHtml(value ?? "")}" aria-label="${label}">`;
+  }
+
+  function rowHtml(c, i) {
+    const opts = `<option value="" ${serviceOf(c) ? "" : "selected"}>Choose…</option>` +
+      SERVICES.map((x) => `<option value="${x.id}" ${serviceOf(c) === x.id ? "selected" : ""}>${x.label}</option>`).join("");
+    return `
       <tr data-i="${i}">
-        <td><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name"></td>
-        <td class="num"><input type="number" data-field="fee" value="${c.fee ?? ""}" min="0" step="10" aria-label="Monthly fee"></td>
-        <td class="num"><input type="number" data-field="hours" value="${c.hours ?? ""}" min="0" step="0.5" aria-label="Total hours per month"></td>
-        <td class="num"><input type="number" data-field="teamHours" value="${c.teamHours ?? ""}" min="0" step="0.5" aria-label="Team hours per month"></td>
-        <td class="num"><input type="number" data-field="otherCosts" value="${c.otherCosts ?? ""}" min="0" step="5" aria-label="Other direct costs per month"></td>
+        <td><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${c.note ? `<div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}</div>` : ""}</td>
+        <td><select data-field="type" aria-label="Service">${opts}</select></td>
+        <td class="num">${numInput("fee", c.fee, "Monthly fee")}<span data-out="reset"></span></td>
+        <td class="num">${numInput("hours", c.hours, "Total hours per month")}</td>
+        <td class="num">${numInput("teamHours", c.teamHours, "Team hours per month")}</td>
+        <td class="num">${numInput("otherCosts", c.otherCosts, "Other direct costs per month")}</td>
+        <td class="num">${numInput("wip", c.wip, "Unbilled work in progress, dollars")}</td>
         <td class="num" data-out="rate"></td>
         <td data-out="status"></td>
         <td class="num" data-out="needed"></td>
         <td class="num" data-out="gp"></td>
         <td class="col-remove no-print"><button class="btn-remove" type="button" data-remove="${i}" title="Remove client" aria-label="Remove client">&times;</button></td>
-      </tr>`).join("");
+      </tr>`;
+  }
+
+  function renderRows() {
+    if (state.clients.length === 0) {
+      els.rows.innerHTML = `<tr><td colspan="${COLS}" class="empty">No clients yet. Click <strong>+ Add client</strong> or <strong>Load sample data</strong> to get started.</td></tr>`;
+      return;
+    }
+    const groups = SERVICES.map((x) => x.id).concat([""]).map((id) => ({
+      id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id)
+    })).filter((g) => g.items.length);
+    const heads = groups.length > 1 || groups[0].id !== "";
+    els.rows.innerHTML = groups.map((g) => (heads ? `
+      <tr class="group" data-group="${g.id}">
+        <td colspan="2">${serviceLabel(g.id)} <span class="muted" style="font-weight:500;">(${g.items.length})</span></td>
+        <td class="num" data-gout="fee"></td><td class="num" data-gout="hours"></td><td></td><td></td>
+        <td class="num" data-gout="wip"></td><td class="num" data-gout="rate"></td><td colspan="${COLS - 8}"></td>
+      </tr>` : "") + g.items.map((x) => rowHtml(x.c, x.i)).join("")).join("");
     updateRowOutputs();
   }
 
   function updateRowOutputs() {
     els.rows.querySelectorAll("tr[data-i]").forEach((tr) => {
-      const a = analyse(state.clients[+tr.dataset.i]);
+      const c = state.clients[+tr.dataset.i];
+      const a = analyse(c);
+      const reset = tr.querySelector('[data-out="reset"]');
+      const orig = c.origFee;
+      reset.innerHTML = orig !== undefined && orig !== "" && Math.round(num(orig)) !== Math.round(num(c.fee))
+        ? `<button type="button" class="link-btn reset-fee" data-reset-fee="${tr.dataset.i}" title="Use the ${escapeHtml(c.origLabel || "original")} figure again">↺ ${escapeHtml(c.origLabel || "Original")} ${money(num(orig))}</button>` : "";
       tr.querySelector('[data-out="rate"]').textContent = a.rate === null ? "—" : money(a.rate, 2);
-      tr.querySelector('[data-out="status"]').innerHTML = `<span class="status ${a.status}">${STATUS_LABEL[a.status]}</span>`;
+      tr.querySelector('[data-out="status"]').innerHTML = a.status === "none" ? '<span class="muted">—</span>' : `<span class="status ${a.status}">${STATUS_LABEL[a.status]}</span>`;
       tr.querySelector('[data-out="needed"]').innerHTML = a.neededFee === null
         ? '<span class="muted">—</span>'
-        : `<span class="needed">${money(a.neededFee)}</span>`;
-      tr.querySelector('[data-out="gp"]').innerHTML = a.fee > 0 || a.cost > 0
+        : `<span class="needed"${a.skipped ? ' style="text-decoration:line-through;opacity:.6;" title="Not repricing"' : ""}>${money(a.neededFee)}</span>`;
+      tr.querySelector('[data-out="gp"]').innerHTML = a.revenue > 0 || a.cost > 0
         ? `<span class="gp${a.grossProfit < 0 ? " loss" : ""}">${money(a.grossProfit)}<span class="pct">${a.margin === null ? "" : pct(a.margin)}</span></span>`
         : '<span class="muted">—</span>';
+    });
+    els.rows.querySelectorAll("tr.group").forEach((tr) => {
+      const g = serviceStats(tr.dataset.group);
+      tr.querySelector('[data-gout="fee"]').textContent = money(g.fee);
+      tr.querySelector('[data-gout="hours"]').textContent = g.hours ? hrs(g.hours, 1) : "";
+      tr.querySelector('[data-gout="wip"]').textContent = g.wip ? money(g.wip) : "";
+      tr.querySelector('[data-gout="rate"]').textContent = g.rate === null ? "" : money(g.rate, 2);
     });
   }
 
   function renderSummary() {
-    let monthly = 0, hours = 0, extraMonthly = 0, costMonthly = 0, hoursRevenue = 0, missing = 0;
-    state.clients.forEach((c) => {
-      const a = analyse(c);
-      monthly += a.fee;
-      costMonthly += a.cost;
-      hours += a.hours;
-      if (a.hours > 0) hoursRevenue += a.fee;
-      else if (a.fee > 0) missing++;
-      if (a.neededFee !== null) extraMonthly += a.neededFee - a.fee;
-    });
-    const annual = monthly * 12;
-    const avgRate = hours > 0 ? hoursRevenue / hours : null;
-    const missingNote = missing ? `<div class="sub" style="color:var(--amber);font-weight:600;">${missing} client${missing === 1 ? " has" : "s have"} no hours entered</div>` : "";
-    const extraAnnual = extraMonthly * 12;
-    const costAnnual = costMonthly * 12;
+    const t = clientTotals();
+    const annual = t.revenue * 12;
+    const extraAnnual = t.extra * 12;
+    const costAnnual = t.cost * 12;
     const gpAnnual = annual - costAnnual;
     const margin = annual > 0 ? gpAnnual / annual : null;
     const pt = profitTarget();
+    const byService = SERVICES.filter((x) => x.id !== "course").map((x) => ({ x, g: serviceStats(x.id) })).filter((r) => r.g.rate !== null);
+    const missingNote = t.missing ? `<div class="sub" style="color:var(--amber);font-weight:600;">${t.missing} client${t.missing === 1 ? " has" : "s have"} no hours entered</div>` : "";
 
-    let html = `
-      <div class="stat"><div class="label">Monthly revenue</div><div class="value">${money(monthly)}</div></div>
-      <div class="stat"><div class="label">Annual revenue</div><div class="value">${money(annual)}</div></div>
-      <div class="stat navy"><div class="label">Cost of sales / year</div><div class="value">${money(costAnnual)}</div><div class="sub">${money(costMonthly)} / month</div></div>
-      <div class="stat navy"><div class="label">Gross profit / year</div><div class="value">${money(gpAnnual)}</div><div class="sub">${margin === null ? "&nbsp;" : pct(margin) + " gross margin"}</div></div>
-      <div class="stat"><div class="label">Total hours / month</div><div class="value">${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div><div class="sub">${(hours * 12).toLocaleString(undefined, { maximumFractionDigits: 0 })} hours / year</div>${missingNote}</div>
-      <div class="stat teal"><div class="label">Average effective rate</div><div class="value">${avgRate === null ? "—" : money(avgRate, 2)}</div>${num(state.targetRate) > 0 ? `<div class="sub">Target: ${money(num(state.targetRate), 2)}</div>` : ""}${missing ? `<div class="sub">Clients with hours entered only</div>` : ""}</div>
-      <div class="stat highlight"><div class="label">Extra from repricing</div><div class="value">${money(extraAnnual)}</div><div class="sub">per year (revenue and gross profit) if all under-target clients are repriced</div></div>`;
-
+    let html = `<div class="summary-grid">
+      <div class="stat"><div class="label">Total hours / month</div><div class="value">${hrs(t.hours, 1)}</div><div class="sub">${hrs(t.hours * 12)} hours / year</div>${missingNote}</div>
+      <div class="stat teal"><div class="label">Average effective rate</div><div class="value">${t.avgRate === null ? "—" : money(t.avgRate, 2)}</div>
+        ${byService.length > 1 ? `<div class="sub">${byService.map((r) => `${r.x.label} ${money(r.g.rate)}`).join(" · ")}</div>` : ""}
+        ${num(state.targetRate) > 0 ? `<div class="sub">Overall target: ${money(num(state.targetRate), 2)}</div>` : ""}</div>
+      <div class="stat highlight"><div class="label">Extra from repricing</div><div class="value">${money(extraAnnual)}</div><div class="sub">per year if the under-target clients you haven't skipped are repriced</div></div>`;
     if (pt) {
       const gap = pt.revenue - annual;
       const afterRepricing = gap - extraAnnual;
       let sub;
       if (gap <= 0) sub = `You're ahead of the ${money(pt.revenue)} revenue your profit target needs`;
       else if (afterRepricing <= 0) sub = `Repricing alone would close it`;
-      else sub = `Still ${money(afterRepricing)} short after repricing`;
+      else sub = `Still ${money(afterRepricing)} short after repricing. See Fill the gap below`;
       html += `<div class="stat highlight"><div class="label">${gap > 0 ? "Revenue gap to profit target" : "Ahead of profit target"}</div><div class="value">${money(Math.abs(gap))}</div><div class="sub">${sub}.</div></div>`;
     } else {
       html += `<div class="stat highlight"><div class="label">Revenue gap to profit target</div><div class="value">—</div><div class="sub">Fill in the Profit target tab to see this.</div></div>`;
     }
+    html += `</div><div class="mini-stats">
+      <span>Monthly revenue <strong>${money(t.revenue)}</strong></span>
+      <span>Annual revenue <strong>${money(annual)}</strong></span>
+      ${t.wip ? `<span>WIP to bill <strong>${money(t.wip)}</strong></span>` : ""}
+      <span>Cost of sales / year <strong>${money(costAnnual)}</strong></span>
+      <span>Gross profit / year <strong>${money(gpAnnual)}</strong>${margin === null ? "" : ` (${pct(margin)})`}</span>
+    </div>`;
     els.summary.innerHTML = html;
   }
 
@@ -723,9 +868,9 @@ const CAPACITY_GUIDE = {
     }
 
     const under = state.clients
-      .map((c) => ({ c, a: analyse(c) }))
+      .map((c, i) => ({ c, i, a: analyse(c) }))
       .filter((x) => x.a.neededFee !== null)
-      .sort((x, y) => x.a.rate - y.a.rate);
+      .sort((x, y) => (x.a.skipped - y.a.skipped) || (x.a.rate / x.a.target - y.a.rate / y.a.target));
 
     if (state.clients.length === 0) {
       els.repricing.innerHTML = '<p class="muted">Add some clients to see repricing suggestions.</p>';
@@ -736,22 +881,25 @@ const CAPACITY_GUIDE = {
       return;
     }
 
-    const rows = under.map(({ c, a }) => `
-      <tr>
-        <td>${escapeHtml(c.name || "Unnamed client")}</td>
+    const rows = under.map(({ c, i, a }) => `
+      <tr class="${a.skipped ? "skipped" : ""}">
+        <td>${escapeHtml(c.name || "Unnamed client")}${serviceOf(c) ? `<div class="row-note">${serviceLabel(serviceOf(c))}</div>` : ""}</td>
         <td><span class="status ${a.status}">${money(a.rate, 2)}</span></td>
+        <td class="num">${money(a.target, 2)}</td>
         <td class="num">${money(a.fee)}</td>
         <td class="num"><span class="needed">${money(a.neededFee)}</span></td>
         <td class="num">+${money(a.neededFee - a.fee)}</td>
         <td class="num">+${money((a.neededFee - a.fee) * 12)}</td>
+        <td class="no-print"><button type="button" class="link-btn" data-skip="${i}">${a.skipped ? "Include" : "Skip"}</button></td>
       </tr>`).join("");
+    const live = under.filter((x) => !x.a.skipped).length;
 
     els.repricing.innerHTML = `
-      <p style="margin-top:0;">${under.length} client${under.length === 1 ? " is" : "s are"} below your target rate of ${money(target, 2)} per hour. Lowest effective rate first:</p>
+      <p style="margin-top:0;">${under.length} client${under.length === 1 ? " is" : "s are"} below target${live < under.length ? `, and you're repricing ${live}` : ""}. Click Skip for one-off or ad hoc clients you won't reprice; they stay listed but aren't counted.</p>
       <div class="table-scroll"><table>
         <thead><tr>
-          <th>Client</th><th>Current rate</th><th class="num">Current fee</th>
-          <th class="num">Suggested fee</th><th class="num">Increase / month</th><th class="num">Increase / year</th>
+          <th>Client</th><th>Current rate</th><th class="num">Target</th><th class="num">Current fee</th>
+          <th class="num">Suggested fee</th><th class="num">Increase / month</th><th class="num">Increase / year</th><th class="no-print"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
@@ -847,17 +995,103 @@ const CAPACITY_GUIDE = {
     $("ptCompare").innerHTML = html;
   }
 
+  const PLAN_SERVICES = ["coaching", "consulting", "bookkeeping"];
+
+  function renderPlan() {
+    const pt = profitTarget();
+    if (!pt) { els.plan.innerHTML = '<p class="muted">Fill in the Profit target tab first. This plans how to close the gap between what your clients bring in now and the revenue your target needs.</p>'; return; }
+    const p = state.plan;
+    const t = clientTotals();
+    const input = (key, val, label, ph) => `<input class="calc" type="text" inputmode="decimal" data-plan="${key}" value="${escapeHtml(val ?? "")}" aria-label="${label}" placeholder="${ph || ""}">`;
+    let rows = `
+      <tr><td><label style="display:flex;gap:8px;align-items:center;cursor:pointer;"><input type="checkbox" data-plan="reprice" ${p.reprice ? "checked" : ""}>Reprice under-target clients</label></td>
+        <td class="muted" style="font-size:.85rem;">From Repricing suggestions, leaving out any you skipped</td><td class="amt" data-pout="reprice"></td><td class="amt" data-pout="reprice-h"></td></tr>`;
+    if (t.wip > 0) rows += `
+      <tr><td><label style="display:flex;gap:8px;align-items:center;cursor:pointer;"><input type="checkbox" data-plan="wip" ${p.wip ? "checked" : ""}>Bill your WIP</label></td>
+        <td class="muted" style="font-size:.85rem;">Unbilled work in the client table, billed once</td><td class="amt" data-pout="wip"></td><td class="amt" data-pout="wip-h"></td></tr>`;
+    PLAN_SERVICES.forEach((id) => {
+      const g = serviceStats(id);
+      rows += `
+      <tr><td>New ${serviceLabel(id).toLowerCase()} clients</td>
+        <td>${input("n." + id, p.n[id], "Number of new " + id + " clients", "0")} × ${input("fee." + id, p.fee[id], "Monthly fee for new " + id + " clients", g.avgFee ? Math.round(g.avgFee) : "fee")} / month</td>
+        <td class="amt" data-pout="${id}"></td><td class="amt" data-pout="${id}-h"></td></tr>`;
+    });
+    rows += `
+      <tr><td>Course and programme sales</td>
+        <td>${input("courses", p.courses, "Number of course sales", "0")} × ${input("coursePrice", p.coursePrice, "Price per course sale", "price")} each</td>
+        <td class="amt" data-pout="courses"></td><td class="amt" data-pout="courses-h"></td></tr>
+      <tr><td><input type="text" data-plan="otherLabel" value="${escapeHtml(p.otherLabel || "")}" placeholder="Something else" aria-label="Other idea"></td>
+        <td>${input("other", p.other, "Amount per year for other idea", "0")} a year</td>
+        <td class="amt" data-pout="other"></td><td class="amt" data-pout="other-h"></td></tr>
+      <tr class="total"><td colspan="2">Plan total</td><td class="amt" data-pout="total"></td><td class="amt" data-pout="total-h"></td></tr>`;
+    els.plan.innerHTML = `
+      <div class="bar-wrap" id="planBar"></div>
+      <div class="table-scroll"><table class="plan-table">
+        <thead><tr><th>Idea</th><th>How many</th><th class="num">Adds a year</th><th class="num">Extra hours / month</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="table-note" id="planNote"></p>`;
+    updatePlan();
+  }
+
+  function planFigures() {
+    const p = state.plan;
+    const t = clientTotals();
+    const f = { reprice: p.reprice ? t.extra * 12 : 0, wip: p.wip ? t.wip : 0, courses: num(p.courses) * num(p.coursePrice), other: num(p.other), hours: {} };
+    PLAN_SERVICES.forEach((id) => {
+      const g = serviceStats(id);
+      const n = num(p.n[id]);
+      const fee = num(p.fee[id]) || g.avgFee;
+      f[id] = n * fee * 12;
+      const perClientHours = g.rate ? fee / g.rate : (targetFor({ type: id }) ? fee / targetFor({ type: id }) : g.avgHours);
+      f.hours[id] = n * (perClientHours || 0);
+    });
+    f.total = f.reprice + f.wip + f.courses + f.other + PLAN_SERVICES.reduce((a, id) => a + f[id], 0);
+    f.totalHours = PLAN_SERVICES.reduce((a, id) => a + f.hours[id], 0);
+    return f;
+  }
+
+  function updatePlan() {
+    if (!$("planBar")) return;
+    const pt = profitTarget();
+    if (!pt) { renderPlan(); return; }
+    const t = clientTotals();
+    const f = planFigures();
+    const set = (k, v) => { const el = els.plan.querySelector(`[data-pout="${k}"]`); if (el) el.textContent = v; };
+    ["reprice", "wip", "courses", "other"].concat(PLAN_SERVICES).forEach((k) => {
+      set(k, f[k] ? "+" + money(f[k]) : "—");
+      set(k + "-h", f.hours[k] ? "+" + hrs(f.hours[k], 1) : "—");
+    });
+    set("total", money(f.total));
+    set("total-h", f.totalHours ? "+" + hrs(f.totalHours, 1) : "—");
+    const annual = t.revenue * 12;
+    const gap = Math.max(0, pt.revenue - annual);
+    const covered = gap > 0 ? Math.min(1, f.total / gap) : 1;
+    const left = gap - f.total;
+    $("planBar").innerHTML = `
+      <div class="bar"><span class="now" style="width:${covered * 100}%;float:left;background:var(--teal);"></span></div>
+      <div class="bar-legend"><span>Gap to profit target <strong>${money(gap)}</strong> a year</span><span>This plan covers <strong>${gap > 0 ? Math.round(covered * 100) : 100}%</strong></span>
+      <span>${left > 0 ? `Still to find <strong>${money(left)}</strong>` : gap > 0 ? `Gap covered with <strong>${money(-left)}</strong> to spare` : "You're already at your target"}</span></div>`;
+    $("planNote").innerHTML = `New clients are counted for a full year at the fee shown (your current average for that service unless you change it). Extra hours use your current effective rate for that service. ${f.totalHours ? `Your hours would go from ${hrs(t.hours, 1)} to ${hrs(t.hours + f.totalHours, 1)} a month.` : ""}`;
+  }
+
   function renderOutputs() {
     updateRowOutputs();
     renderSummary();
     renderRepricing();
     renderProfitTarget();
+    if ($("planBar")) updatePlan(); else renderPlan();
   }
 
   function renderAll() {
+    // Older saved data, sample data and Clear all may not have the newer settings
+    state.typeRates = Object.assign(emptyRates(), state.typeRates || {});
+    state.plan = Object.assign(emptyPlan(), state.plan || {});
+    state.pt = Object.assign(emptyPt(), state.pt || {});
     els.targetRate.value = state.targetRate;
     els.currency.value = state.currency;
     els.teamCostRate.value = state.teamCostRate ?? "";
+    ["coaching", "consulting", "bookkeeping"].forEach((id) => { $("rate" + id[0].toUpperCase() + id.slice(1)).value = (state.typeRates || {})[id] ?? ""; });
     $("dataNote").hidden = !state.dataNote;
     $("dataNote").textContent = state.dataNote || "";
     const p = state.pt;
@@ -869,9 +1103,48 @@ const CAPACITY_GUIDE = {
     renderSummary();
     renderRepricing();
     renderProfitTarget();
+    renderPlan();
   }
 
   // ---------- events ----------
+  // Calculator: a sum in any number box is worked out on Enter or when you leave the box
+  function settleSum(el) {
+    const v = evalSum(el.value);
+    if (v === null) return;
+    el.value = String(v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.classList && e.target.classList.contains("calc")) { e.preventDefault(); settleSum(e.target); }
+  });
+  document.addEventListener("focusout", (e) => { if (e.target.classList && e.target.classList.contains("calc")) settleSum(e.target); });
+
+  ["coaching", "consulting", "bookkeeping"].forEach((id) => {
+    const el = $("rate" + id[0].toUpperCase() + id.slice(1));
+    el.addEventListener("input", () => { state.typeRates[id] = el.value; save(); renderOutputs(); });
+  });
+
+  // Fill the gap inputs
+  els.plan.addEventListener("input", (e) => {
+    const key = e.target.dataset.plan;
+    if (!key) return;
+    const v = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    const [a, b] = key.split(".");
+    if (b) state.plan[a] = Object.assign({}, state.plan[a], { [b]: v }); else state.plan[a] = v;
+    save();
+    updatePlan();
+  });
+  els.plan.addEventListener("change", (e) => { if (e.target.type === "checkbox") e.target.dispatchEvent(new Event("input", { bubbles: true })); });
+
+  // Repricing: skip / include
+  els.repricing.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-skip]");
+    if (!b) return;
+    const c = state.clients[+b.dataset.skip];
+    c.noReprice = !c.noReprice;
+    save();
+    renderOutputs();
+  });
   els.targetRate.addEventListener("input", () => { state.targetRate = els.targetRate.value; save(); renderOutputs(); });
   ["netProfit", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
     const el = $("pt" + f.charAt(0).toUpperCase() + f.slice(1));
@@ -933,10 +1206,20 @@ const CAPACITY_GUIDE = {
     if (!field || !tr) return;
     state.clients[+tr.dataset.i][field] = e.target.value;
     save();
+    if (field === "type") renderRows();
     renderOutputs();
   });
 
   els.rows.addEventListener("click", (e) => {
+    const r = e.target.closest("[data-reset-fee]");
+    if (r) {
+      const c = state.clients[+r.dataset.resetFee];
+      c.fee = c.origFee;
+      save();
+      renderRows();
+      renderOutputs();
+      return;
+    }
     const btn = e.target.closest("[data-remove]");
     if (!btn) return;
     const removed = state.clients.splice(+btn.dataset.remove, 1)[0];
