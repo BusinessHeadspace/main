@@ -222,8 +222,11 @@ const CAPACITY_GUIDE = {
   .bar-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
   .data-note { font-size: .85rem; color: var(--navy); background: #E6F5F7; border-left: 4px solid var(--teal); padding: 6px 10px; border-radius: 6px; }
-  .file-msg { margin: -10px 0 18px; font-size: .85rem; color: var(--navy); }
-  .file-msg.error { color: var(--red); }
+  .file-msg { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20;
+    margin: 0; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 8px; font-size: .9rem;
+    background: var(--navy); color: var(--white); box-shadow: 0 4px 16px rgba(7,58,89,.25); }
+  .file-msg .link-btn { color: var(--gold); font-size: .9rem; margin-left: 4px; }
+  .file-msg.error { background: var(--red); }
 
   .import-steps { margin: 0 0 16px; padding-left: 20px; display: grid; gap: 14px; }
   .import-steps li { padding-left: 4px; }
@@ -1222,12 +1225,24 @@ const CAPACITY_GUIDE = {
     }
     const btn = e.target.closest("[data-remove]");
     if (!btn) return;
-    const removed = state.clients.splice(+btn.dataset.remove, 1)[0];
-    if (window.PPC && typeof window.PPC.onRemoveClient === "function") window.PPC.onRemoveClient(removed);
+    const at = +btn.dataset.remove;
+    const removed = state.clients.splice(at, 1)[0];
+    try {
+      if (window.PPC && typeof window.PPC.onRemoveClient === "function") window.PPC.onRemoveClient(removed);
+    } catch (err) { /* the row is still removed */ }
     save();
     renderRows();
-    renderSummary();
-    renderRepricing();
+    renderOutputs();
+    showUndo(`Removed ${removed && removed.name ? removed.name : "the client"}.`, () => {
+      state.clients.splice(Math.min(at, state.clients.length), 0, removed);
+      try {
+        if (window.PPC && typeof window.PPC.onRestoreClient === "function") window.PPC.onRestoreClient(removed);
+      } catch (err) { /* still restored */ }
+      save();
+      renderRows();
+      renderOutputs();
+      showFileMsg(`Put ${removed && removed.name ? removed.name : "the client"} back.`);
+    });
   });
 
   $("addClientBtn").addEventListener("click", () => {
@@ -1253,6 +1268,23 @@ const CAPACITY_GUIDE = {
     save();
     renderAll();
   });
+
+  // A message with an Undo button
+  function showUndo(text, undo) {
+    const el = $("fileMsg");
+    el.innerHTML = "";
+    el.append(text + " ");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "link-btn";
+    b.textContent = "Undo";
+    b.addEventListener("click", () => { el.hidden = true; undo(); });
+    el.append(b);
+    el.classList.remove("error");
+    el.hidden = false;
+    clearTimeout(showFileMsg.t);
+    showFileMsg.t = setTimeout(() => { el.hidden = true; }, 10000);
+  }
 
   // Save / open a data file
   function showFileMsg(text, isError) {

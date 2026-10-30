@@ -123,7 +123,14 @@
   }
 
   window.PPC.onChange = () => { persist(); renderYtd(); };
+  window.PPC.onRestoreClient = (c) => {
+    if (c && c.xeroContactId) {
+      saved.sync.hidden = (saved.sync.hidden || []).filter((h) => h.id !== c.xeroContactId);
+      renderSettings();
+    }
+  };
   window.PPC.onRemoveClient = (c) => {
+    if (!Array.isArray(saved.sync.hidden)) saved.sync.hidden = [];
     if (c && c.source === "xero" && c.xeroContactId && !saved.sync.hidden.some((h) => h.id === c.xeroContactId)) {
       saved.sync.hidden.push({ id: c.xeroContactId, name: c.name });
       renderSettings();
@@ -279,7 +286,7 @@
       if (!regular) {
         note = `Ad hoc: billed ${money(c.total)} in ${billed} of the last ${x.months} months. Shown as a monthly average.`;
       } else if (c.last.slice(0, 7) < lastMonth) {
-        note = `Last billed ${monthName(c.last.slice(0, 7))}. If they've finished, remove them with ×.`;
+        note = `Last billed ${monthName(c.last.slice(0, 7))}. If they've finished, remove them with the × at the end of the row.`;
         warn = true;
       } else if (billed < active) {
         note = `Averaged over the ${billed} months billed (not billed in ${active - billed}).`;
