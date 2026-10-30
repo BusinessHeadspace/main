@@ -344,9 +344,6 @@ const CAPACITY_GUIDE = {
           <label class="field"><span>Net profit you want <span class="hint">(before tax)</span></span>
             <input type="number" id="ptNetProfit" min="0" step="1000" placeholder="e.g. 60000">
           </label>
-          <label class="field"><span>Tax rate on profit % <span class="hint">(optional, to see take-home pay)</span></span>
-            <input type="number" id="ptTaxRate" min="0" max="100" step="1" placeholder="e.g. 28">
-          </label>
           <label class="field"><span>Overheads <span class="hint">(expenses from your Budget, not cost of sales)</span></span>
             <input type="number" id="ptOverheads" min="0" step="500" placeholder="e.g. 18000">
           </label>
@@ -446,7 +443,7 @@ const CAPACITY_GUIDE = {
     targetRate: 95,
     currency: "NZD",
     teamCostRate: 42,
-    pt: { basis: "year", netProfit: 60000, taxRate: 28, overheads: 18000, gpPct: 60, people: 2, weeks: 48 },
+    pt: { basis: "year", netProfit: 60000, overheads: 18000, gpPct: 60, people: 2, weeks: 48 },
     clients: [
       { name: "Kowhai Plumbing Ltd",        fee: 650,  hours: 6,   teamHours: 4, otherCosts: 35 },
       { name: "Harbourside Café",           fee: 420,  hours: 5,   teamHours: 3, otherCosts: 25 },
@@ -461,7 +458,7 @@ const CAPACITY_GUIDE = {
     ]
   };
 
-  const emptyPt = () => ({ basis: "year", netProfit: "", taxRate: "", overheads: "", gpPct: "", people: "", weeks: "" });
+  const emptyPt = () => ({ basis: "year", netProfit: "", overheads: "", gpPct: "", people: "", weeks: "" });
   let state = { targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] };
 
   const $ = (id) => document.getElementById(id);
@@ -521,6 +518,7 @@ const CAPACITY_GUIDE = {
   function loadData(d) {
     state = Object.assign({ targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] }, d);
     state.pt = Object.assign(emptyPt(), d.pt || {});
+    delete state.pt.taxRate;
     if (!Array.isArray(state.clients)) state.clients = [];
     if (!LOCALES[state.currency]) state.currency = "NZD";
     save();
@@ -580,7 +578,6 @@ const CAPACITY_GUIDE = {
     const netProfit = num(p.netProfit) * k;
     const overheads = num(p.overheads) * k;
     const gpPct = num(p.gpPct) / 100;
-    const taxRate = num(p.taxRate) / 100;
     const rate = num(state.targetRate);
     const people = Math.max(1, num(p.people) || 1);
     const weeks = num(p.weeks) > 0 ? Math.min(52, num(p.weeks)) : 52;
@@ -595,8 +592,7 @@ const CAPACITY_GUIDE = {
         : perPersonWeek <= CAPACITY_GUIDE.stretch ? "amber" : "red";
     }
     return {
-      netProfit, overheads, gpPct, taxRate, rate, people, weeks, grossProfit, revenue,
-      tax: netProfit * taxRate, takeHome: netProfit * (1 - taxRate),
+      netProfit, overheads, gpPct, rate, people, weeks, grossProfit, revenue,
       cos: revenue - grossProfit, hours, perPersonWeek, status
     };
   }
@@ -763,9 +759,6 @@ const CAPACITY_GUIDE = {
 
     const perMonth = (v) => `<span class="per">${money(v / 12)} / month</span>`;
     let rows = `<tr><td class="op"></td><td>Net profit you want</td><td class="amt">${money(r.netProfit)}${perMonth(r.netProfit)}</td></tr>`;
-    if (r.taxRate > 0) {
-      rows += `<tr class="aside"><td class="op"></td><td>After ${pct(r.taxRate)} tax (${money(r.tax)}), your take-home pay is</td><td class="amt">${money(r.takeHome)}${perMonth(r.takeHome)}</td></tr>`;
-    }
     rows += `<tr><td class="op">+</td><td>Overheads</td><td class="amt">${money(r.overheads)}</td></tr>
       <tr class="total"><td class="op">=</td><td>Gross profit needed</td><td class="amt">${money(r.grossProfit)}</td></tr>
       <tr><td class="op">÷</td><td>Target gross profit</td><td class="amt">${pct(r.gpPct)}</td></tr>
@@ -846,7 +839,7 @@ const CAPACITY_GUIDE = {
     $("dataNote").textContent = state.dataNote || "";
     const p = state.pt;
     $(p.basis === "month" ? "ptBasisMonth" : "ptBasisYear").checked = true;
-    ["netProfit", "taxRate", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
+    ["netProfit", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
       $("pt" + f.charAt(0).toUpperCase() + f.slice(1)).value = p[f] ?? "";
     });
     renderRows();
@@ -857,7 +850,7 @@ const CAPACITY_GUIDE = {
 
   // ---------- events ----------
   els.targetRate.addEventListener("input", () => { state.targetRate = els.targetRate.value; save(); renderOutputs(); });
-  ["netProfit", "taxRate", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
+  ["netProfit", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
     const el = $("pt" + f.charAt(0).toUpperCase() + f.slice(1));
     el.addEventListener("input", () => { state.pt[f] = el.value; save(); renderOutputs(); });
   });
