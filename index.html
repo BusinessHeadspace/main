@@ -123,6 +123,7 @@ const CAPACITY_GUIDE = {
   #clientTable input[data-field="name"] { min-width: 170px; }
   #clientTable input.calc { width: 70px; text-align: right; padding: 8px 7px; }
   #clientTable select { padding: 7px 4px; font-size: .82rem; width: 112px; }
+  #clientTable select[data-field="freq"] { width: 96px; }
   #clientTable td, #clientTable th { padding-left: 5px; padding-right: 5px; }
   #clientTable tr.group td { background: var(--cream); font-weight: 700; color: var(--navy); border-top: 2px solid var(--line); }
   #clientTable tr.group td.num { font-variant-numeric: tabular-nums; }
@@ -360,7 +361,7 @@ const CAPACITY_GUIDE = {
         <input class="calc" type="text" inputmode="decimal" id="teamCostRate" placeholder="e.g. 42">
       </label>
     </div>
-    <p class="table-note" style="margin:16px 0 8px;"><strong>Target rate by service</strong> (optional). Leave blank to use the overall rate. The overall rate is also what the Profit target uses.</p>
+    <p class="table-note" style="margin:16px 0 8px;"><strong>Target rate by category</strong> (optional). Leave blank to use the overall rate. The overall rate is also what the Profit target uses.</p>
     <div class="settings">
       <label class="field">Coaching
         <input class="calc" type="text" inputmode="decimal" id="rateCoaching" placeholder="Same as overall">
@@ -463,11 +464,12 @@ const CAPACITY_GUIDE = {
         <thead>
           <tr>
             <th>Client name</th>
-            <th>Service</th>
-            <th class="num">Monthly fee</th>
-            <th class="num">Total hours / month</th>
-            <th class="num">Team hours</th>
-            <th class="num">Other direct costs</th>
+            <th>Category</th>
+            <th>Billed</th>
+            <th class="num">Fee per bill</th>
+            <th class="num">Hours per bill</th>
+            <th class="num">Team hours per bill</th>
+            <th class="num">Other direct costs per bill</th>
             <th class="num">WIP $ (unbilled)</th>
             <th class="num">Effective rate</th>
             <th>Rate check</th>
@@ -485,7 +487,7 @@ const CAPACITY_GUIDE = {
       <span class="status amber">Within 15% below</span>
       <span class="status red">More than 15% below</span>
     </div>
-    <p class="table-note"><strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses, programmes and software don't need hours.</p>
+    <p class="table-note"><strong>Fees, hours and costs are per bill</strong>: what you charge each time you invoice, and the time that takes. Set <strong>Billed</strong> for clients you don't bill monthly (such as 2-monthly GST or 6-monthly reviews). Totals, the summary and Fill the gap convert everything to monthly. <strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses, programmes and software don't need hours.</p>
   </section>
 
   <!-- Summary -->
@@ -552,9 +554,16 @@ const CAPACITY_GUIDE = {
     { id: "course", label: "Courses & programmes" },
     { id: "other", label: "Other" }
   ];
+  const FREQS = [
+    { id: "1", label: "Monthly", months: 1 }, { id: "2", label: "2-monthly", months: 2 }, { id: "3", label: "Quarterly", months: 3 },
+    { id: "6", label: "6-monthly", months: 6 }, { id: "12", label: "Annually", months: 12 }, { id: "adhoc", label: "Ad hoc", months: 1 }
+  ];
+  // Months each bill covers (ad hoc fees are already a monthly average)
+  const freqMonths = (c) => (FREQS.find((f) => f.id === String(c.freq)) || FREQS[0]).months;
+  const freqLabel = (c) => (FREQS.find((f) => f.id === String(c.freq)) || FREQS[0]).label;
   const serviceOf = (c) => (SERVICES.some((x) => x.id === c.type) ? c.type : "");
   const serviceLabel = (id) => (SERVICES.find((x) => x.id === id) || { label: "Not grouped yet" }).label;
-  const COLS = 13;
+  const COLS = 14;
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -666,8 +675,10 @@ const CAPACITY_GUIDE = {
     const target = targetFor(client);
     const fee = num(client.fee);
     const wip = num(client.wip);
+    const per = freqMonths(client);
     const wipMonthly = wip / Math.max(1, num(state.periodMonths) || 1);
-    const revenue = fee + wipMonthly;
+    const wipBill = wipMonthly * per;
+    const revenue = fee + wipBill;
     const hours = num(client.hours);
     // Courses and software are sold, not billed by time: no hours or rate check
     const isProduct = client.type === "course" || client.type === "software";
@@ -682,12 +693,14 @@ const CAPACITY_GUIDE = {
       else if (rate >= target) status = "green";
       else if (rate >= target * (1 - AMBER_BAND)) status = "amber";
       else status = "red";
-      if (rate < target) neededFee = target * hours - wipMonthly;
+      if (rate < target) neededFee = target * hours - wipBill;
     }
     const skipped = !!client.noReprice;
     const extra = neededFee !== null && !skipped ? neededFee - fee : 0;
     const missingHours = !isProduct && revenue > 0 && !(hours > 0);
-    return { fee, wip, wipMonthly, revenue, hours, rate, target, status, neededFee, extra, skipped, cost, grossProfit, margin, isProduct, missingHours };
+    // Monthly equivalents for totals
+    const m = { fee: fee / per, hours: hours / per, cost: cost / per, revenue: revenue / per, extra: extra / per };
+    return { fee, wip, wipMonthly, revenue, hours, rate, target, status, neededFee, extra, skipped, cost, grossProfit, margin, isProduct, missingHours, per, m };
   }
 
   // Totals across the client list (monthly figures)
@@ -696,12 +709,12 @@ const CAPACITY_GUIDE = {
     state.clients.forEach((c) => {
       const a = analyse(c);
       if (a.missingHours) t.missing++;
-      t.revenue += a.fee;
+      t.revenue += a.m.fee;
       t.wip += a.wip;
-      t.hours += a.hours;
-      t.cost += a.cost;
-      t.extra += a.extra;
-      if (a.rate !== null) { t.rateRevenue += a.revenue; t.rateHours += a.hours; }
+      t.hours += a.m.hours;
+      t.cost += a.m.cost;
+      t.extra += a.m.extra;
+      if (a.rate !== null) { t.rateRevenue += a.m.revenue; t.rateHours += a.m.hours; }
       if (a.fee > 0) t.count++;
     });
     t.avgRate = t.rateHours > 0 ? t.rateRevenue / t.rateHours : null;
@@ -743,12 +756,12 @@ const CAPACITY_GUIDE = {
       if (serviceOf(c) !== id) return;
       const a = analyse(c);
       g.count++;
-      g.fee += a.fee;
-      g.hours += a.hours;
+      g.fee += a.m.fee;
+      g.hours += a.m.hours;
       g.wip += a.wip;
       if (a.fee > 0) g.feeCount++;
       if (a.hours > 0) g.hoursCount++;
-      if (a.rate !== null) { g.rateRevenue += a.revenue; g.rateHours += a.hours; }
+      if (a.rate !== null) { g.rateRevenue += a.m.revenue; g.rateHours += a.m.hours; }
     });
     g.rate = g.rateHours > 0 ? g.rateRevenue / g.rateHours : null;
     g.avgFee = g.feeCount ? g.fee / g.feeCount : 0;
@@ -766,16 +779,19 @@ const CAPACITY_GUIDE = {
   const noteKey = (c) => c.xeroContactId || String(c.name || "");
 
   function rowHtml(c, i) {
+    const fq = FREQS.some((f) => f.id === String(c.freq)) ? String(c.freq) : "1";
+    const freqOpts = FREQS.map((f) => `<option value="${f.id}" ${fq === f.id ? "selected" : ""}>${f.label}</option>`).join("");
     const opts = `<option value="" ${serviceOf(c) ? "" : "selected"}>Choose…</option>` +
       SERVICES.map((x) => `<option value="${x.id}" ${serviceOf(c) === x.id ? "selected" : ""}>${x.label}</option>`).join("");
     return `
       <tr data-i="${i}">
         <td><div class="name-cell"><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${c.note ? `<details class="note-d${c.noteWarn ? " warn" : ""}" data-note="${i}" ${openNotes.has(noteKey(c)) ? "open" : ""}><summary title="${escapeHtml(c.note)}" aria-label="${c.noteWarn ? "Check" : "Note"}: ${escapeHtml(c.note)}">${c.noteWarn ? "!" : "i"}</summary><div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}</div></details>` : `<span class="note-spacer"></span>`}</div></td>
-        <td><select data-field="type" aria-label="Service">${opts}</select></td>
-        <td class="num">${numInput("fee", c.fee, "Monthly fee")}<span data-out="reset"></span></td>
-        <td class="num">${numInput("hours", c.hours, "Total hours per month")}</td>
-        <td class="num">${numInput("teamHours", c.teamHours, "Team hours per month")}</td>
-        <td class="num">${numInput("otherCosts", c.otherCosts, "Other direct costs per month")}</td>
+        <td><select data-field="type" aria-label="Category">${opts}</select></td>
+        <td><select data-field="freq" aria-label="How often they're billed">${freqOpts}</select></td>
+        <td class="num">${numInput("fee", c.fee, "Fee per bill")}<span data-out="reset"></span></td>
+        <td class="num">${numInput("hours", c.hours, "Hours per bill")}</td>
+        <td class="num">${numInput("teamHours", c.teamHours, "Team hours per bill")}</td>
+        <td class="num">${numInput("otherCosts", c.otherCosts, "Other direct costs per bill")}</td>
         <td class="num">${numInput("wip", c.wip, "Unbilled work in progress, dollars")}</td>
         <td class="num" data-out="rate"></td>
         <td data-out="status"></td>
@@ -800,8 +816,9 @@ const CAPACITY_GUIDE = {
     els.rows.innerHTML = groups.map((g) => (heads ? `
       <tr class="group" data-group="${g.id}">
         <td colspan="2">${serviceLabel(g.id)} <span class="muted" style="font-weight:500;">(${g.items.length})</span></td>
+        <td class="muted" style="font-weight:500;font-size:.78rem;">per month</td>
         <td class="num" data-gout="fee"></td><td class="num" data-gout="hours"></td><td></td><td></td>
-        <td class="num" data-gout="wip"></td><td class="num" data-gout="rate"></td><td colspan="${COLS - 8}"></td>
+        <td class="num" data-gout="wip"></td><td class="num" data-gout="rate"></td><td colspan="${COLS - 9}"></td>
       </tr>` : "") + g.items.map((x) => rowHtml(x.c, x.i)).join("")).join("");
     updateRowOutputs();
   }
@@ -908,13 +925,13 @@ const CAPACITY_GUIDE = {
 
     const rows = under.map(({ c, i, a }) => `
       <tr class="${a.skipped ? "skipped" : ""}">
-        <td>${escapeHtml(c.name || "Unnamed client")}${serviceOf(c) ? `<div class="row-note">${serviceLabel(serviceOf(c))}</div>` : ""}</td>
+        <td>${escapeHtml(c.name || "Unnamed client")}<div class="row-note">${[serviceOf(c) ? serviceLabel(serviceOf(c)) : "", a.per > 1 ? freqLabel(c) : ""].filter(Boolean).join(" · ")}</div></td>
         <td><span class="status ${a.status}">${money(a.rate, 2)}</span></td>
         <td class="num">${money(a.target, 2)}</td>
         <td class="num">${money(a.fee)}</td>
         <td class="num"><span class="needed">${money(a.neededFee)}</span></td>
         <td class="num">+${money(a.neededFee - a.fee)}</td>
-        <td class="num">+${money((a.neededFee - a.fee) * 12)}</td>
+        <td class="num">+${money((a.neededFee - a.fee) / a.per * 12)}</td>
         <td class="no-print"><button type="button" class="link-btn" data-skip="${i}">${a.skipped ? "Include" : "Skip"}</button></td>
       </tr>`).join("");
     const live = under.filter((x) => !x.a.skipped).length;
@@ -923,8 +940,8 @@ const CAPACITY_GUIDE = {
       <p style="margin-top:0;">${under.length} client${under.length === 1 ? " is" : "s are"} below target${live < under.length ? `, and you're repricing ${live}` : ""}. Click Skip for one-off or ad hoc clients you won't reprice; they stay listed but aren't counted.</p>
       <div class="table-scroll"><table>
         <thead><tr>
-          <th>Client</th><th>Current rate</th><th class="num">Target</th><th class="num">Current fee</th>
-          <th class="num">Suggested fee</th><th class="num">Increase / month</th><th class="num">Increase / year</th><th class="no-print"></th>
+          <th>Client</th><th>Current rate</th><th class="num">Target</th><th class="num">Fee per bill</th>
+          <th class="num">Suggested fee</th><th class="num">Increase per bill</th><th class="num">Increase / year</th><th class="no-print"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
@@ -1097,7 +1114,7 @@ const CAPACITY_GUIDE = {
       <div class="bar"><span class="now" style="width:${covered * 100}%;float:left;background:var(--teal);"></span></div>
       <div class="bar-legend"><span>Gap to profit target <strong>${money(gap)}</strong> a year</span><span>This plan covers <strong>${gap > 0 ? Math.round(covered * 100) : 100}%</strong></span>
       <span>${left > 0 ? `Still to find <strong>${money(left)}</strong>` : gap > 0 ? `Gap covered with <strong>${money(-left)}</strong> to spare` : "You're already at your target"}</span></div>`;
-    $("planNote").innerHTML = `New clients are counted for a full year at the fee shown (your current average for that service unless you change it). Extra hours use your current effective rate for that service. ${f.totalHours ? `Your hours would go from ${hrs(t.hours, 1)} to ${hrs(t.hours + f.totalHours, 1)} a month.` : ""}`;
+    $("planNote").innerHTML = `New clients are counted for a full year at the fee shown (your current average for that category unless you change it). Extra hours use your current effective rate for that category. ${f.totalHours ? `Your hours would go from ${hrs(t.hours, 1)} to ${hrs(t.hours + f.totalHours, 1)} a month.` : ""}`;
   }
 
   function renderOutputs() {
@@ -1233,6 +1250,7 @@ const CAPACITY_GUIDE = {
     save();
     if (field === "type") renderRows();
     renderOutputs();
+    if (window.PPC && typeof window.PPC.onClientChange === "function") window.PPC.onClientChange(state.clients[+tr.dataset.i], field);
   });
 
   els.rows.addEventListener("click", (e) => {
@@ -1778,7 +1796,7 @@ const CAPACITY_GUIDE = {
     }).join("");
     const matched = hrsImp.match.filter((m) => m.to >= 0).length;
     $("hoursPreview").innerHTML = totals.length ? `${people}
-      <p class="table-note" style="margin:0 0 8px;">${matched} of ${totals.length} clients in the file are matched to clients in the calculator. Check the matches, then use these hours. Hours are per month.</p>
+      <p class="table-note" style="margin:0 0 8px;">${matched} of ${totals.length} clients in the file are matched to clients in the calculator. Check the matches, then use these hours. Hours here are per month; for clients you don't bill monthly they're converted to hours per bill.</p>
       <div class="scroll-box"><table><thead><tr><th>In the file</th><th>Calculator client</th><th class="num">Hours / month</th><th class="num">Team hours / month</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : `<p class="import-status err">No hours found with these columns. Check the client and hours columns.</p>`;
     $("hoursApply").disabled = !hrsImp.match.some((m) => m.to !== -1);
@@ -1800,8 +1818,9 @@ const CAPACITY_GUIDE = {
         added++;
       } else {
         const c = next.clients[m.to];
-        c.hours = h;
-        if (usePerson) c.teamHours = team;
+        const per = freqMonths(c);
+        c.hours = Math.round(h * per * 100) / 100;
+        if (usePerson) c.teamHours = Math.round(team * per * 100) / 100;
         updated++;
       }
     });

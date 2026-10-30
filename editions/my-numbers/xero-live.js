@@ -129,6 +129,9 @@
   }
 
   window.PPC.onChange = () => { persist(); renderYtd(); };
+  window.PPC.onClientChange = (c, field) => {
+    if (field === "freq" && c && c.source === "xero" && saved.xero) { applyXero(); persist(); }
+  };
   window.PPC.onRestoreClient = (c) => {
     if (c && c.xeroContactId) {
       const keys = [c.xeroKey, c.xeroContactId];
@@ -289,29 +292,60 @@
     });
     const parts = new Map();
     by.forEach((c) => { if (c.total > 0) parts.set(c.cid, (parts.get(c.cid) || 0) + 1); });
+    const endIdx = end.getFullYear() * 12 + end.getMonth();
     return [...by.values()].filter((c) => c.total > 0).map((c) => {
       const f = new Date(c.first + "T00:00:00");
-      const active = Math.max(1, Math.min(x.months, (end.getFullYear() - f.getFullYear()) * 12 + end.getMonth() - f.getMonth() + 1));
-      const billed = c.months.size;
-      const regular = billed >= 2 ? billed >= Math.ceil(active * 0.5) : active <= 1;
-      const per = regular ? billed : x.months;
-      const split = parts.get(c.cid) > 1;
-      let note = "", warn = false;
-      if (!regular) {
-        note = `Ad hoc: billed ${money(c.total)} in ${billed} of the last ${x.months} months. Shown as a monthly average.`;
-      } else if (c.last.slice(0, 7) < lastMonth) {
-        note = `Last billed ${monthName(c.last.slice(0, 7))}. If they've finished, remove them with the × at the end of the row.`;
-        warn = true;
-      } else if (billed < active) {
-        note = `Averaged over the ${billed} months billed (not billed in ${active - billed}).`;
+      const active = Math.max(1, Math.min(x.months, endIdx - (f.getFullYear() * 12 + f.getMonth()) + 1));
+      const idx = [...c.months].map((ym) => +ym.slice(0, 4) * 12 + (+ym.slice(5, 7) - 1)).sort((a, b) => a - b);
+      const billed = idx.length;
+      // How often they're billed: coaching, software and courses are monthly; otherwise the usual gap between bills
+      let freq;
+      if (billed >= 2) {
+        if (["coaching", "software", "course"].includes(c.svc)) freq = "1";
+        else {
+          const gaps = idx.slice(1).map((v, k) => v - idx[k]).sort((a, b) => a - b);
+          const g = gaps[Math.floor((gaps.length - 1) / 2)];
+          freq = String([1, 2, 3, 6, 12].reduce((best, v) => (Math.abs(v - g) < Math.abs(best - g) ? v : best), 1));
+        }
+      } else {
+        freq = active <= 1 ? "1" : "adhoc";
       }
-      if (split) note = (note ? note + " " : "") + `This row is the ${SVC_LABEL[c.svc].toLowerCase()} part of ${c.name}'s invoices.`;
       return {
-        id: c.id, cid: c.cid, name: split ? `${c.name} · ${SVC_LABEL[c.svc]}` : c.name, type: c.svc, note, noteWarn: warn,
-        fee: Math.round(c.total / per),
-        hours: c.hourly && c.svc !== "software" && c.svc !== "course" ? Math.round(c.qty / per * 100) / 100 : ""
+        id: c.id, cid: c.cid, svc: c.svc, type: c.svc, baseName: c.name, split: parts.get(c.cid) > 1,
+        name: parts.get(c.cid) > 1 ? `${c.name} · ${SVC_LABEL[c.svc]}` : c.name,
+        total: c.total, qty: c.qty, hourly: c.hourly && c.svc !== "software" && c.svc !== "course",
+        billed, active, last: idx[billed - 1], endIdx, freq
       };
-    }).sort((a, b) => b.fee - a.fee);
+    }).sort((a, b) => b.total - a.total);
+  }
+
+  const FREQ_MONTHS = { "1": 1, "2": 2, "3": 3, "6": 6, "12": 12 };
+  const FREQ_WORDS = { "2": "every 2 months", "3": "quarterly", "6": "every 6 months", "12": "once a year" };
+
+  // Fee and hours per bill for a client, given how often they're billed
+  function perBill(xc, freq, x) {
+    const adhoc = freq === "adhoc";
+    const per = adhoc ? x.months : xc.billed;
+    const fm = FREQ_MONTHS[freq] || 1;
+    let note = "", warn = false;
+    if (adhoc) {
+      note = `Ad hoc: billed ${money(xc.total)} in ${xc.billed} of the last ${x.months} months. Shown as a monthly average.`;
+    } else if (xc.last + fm <= xc.endIdx) {
+      const ym = Math.floor(xc.last / 12) + "-" + String(xc.last % 12 + 1).padStart(2, "0");
+      note = `Last billed ${monthName(ym)}. If they've finished, remove them with the × at the end of the row.`;
+      warn = true;
+    } else if (fm > 1) {
+      note = `Billed ${FREQ_WORDS[freq]}: average of ${xc.billed} bill${xc.billed === 1 ? "" : "s"}.`;
+    } else if (xc.billed < xc.active) {
+      note = `Averaged over the ${xc.billed} months billed (not billed in ${xc.active - xc.billed}).`;
+    }
+    if (xc.split) note = (note ? note + " " : "") + `This row is the ${SVC_LABEL[xc.svc].toLowerCase()} part of ${xc.baseName}'s invoices.`;
+    return {
+      fee: Math.round(xc.total / per),
+      hours: xc.hourly ? Math.round(xc.qty / per * 100) / 100 : "",
+      monthly: adhoc ? xc.total / x.months : xc.total / xc.billed / fm,
+      note, warn
+    };
   }
 
   // Monthly software cost of sales, from the P&L for the same months as the fees
@@ -331,20 +365,28 @@
     const byContact = new Map(prev.filter((c) => c.xeroContactId && !c.xeroKey).map((c) => [c.xeroContactId, c]));
     const byName = new Map(prev.map((c) => [String(c.name || "").trim().toLowerCase(), c]));
     const changed = (mine, theirs) => mine !== undefined && mine !== "" && theirs !== undefined && String(mine) !== String(theirs);
-    const rows = clientsFrom(x);
-    const softFees = rows.filter((r) => r.type === "software").reduce((t, r) => t + r.fee, 0);
-    const softCost = softwareCost(x);
-    const fresh = rows.map((xc) => {
+    const rows = clientsFrom(x).map((xc) => {
       // Rows saved before clients were split by service match on the contact and their main service
       const legacy = byContact.get(xc.cid);
       const old = byKey.get(xc.id) || (legacy && (legacy.xeroType === xc.type || legacy.type === xc.type) ? legacy : null) || byName.get(xc.name.toLowerCase()) || {};
-      const xeroOther = xc.type === "software" && softCost !== null && softFees > 0 ? Math.round(softCost * xc.fee / softFees * 100) / 100 : undefined;
+      const freq = changed(old.freq, old.xeroFreq) ? String(old.freq) : xc.freq;
+      return Object.assign(xc, { old, detected: xc.freq, freq, bill: perBill(xc, freq, x) });
+    });
+    const softRows = rows.filter((r) => r.type === "software");
+    const softMonthly = softRows.reduce((t, r) => t + r.bill.monthly, 0);
+    const softCost = softwareCost(x);
+    const fresh = rows.map((row) => {
+      const xc = Object.assign({}, row, { fee: row.bill.fee, hours: row.bill.hours, note: row.bill.note, noteWarn: row.bill.warn });
+      const old = row.old;
+      const fm = FREQ_MONTHS[row.freq] || 1;
+      const xeroOther = xc.type === "software" && softCost !== null && softMonthly > 0 ? Math.round(softCost * row.bill.monthly / softMonthly * fm * 100) / 100 : undefined;
       const youChangedOther = old.otherCosts !== undefined && old.otherCosts !== "" && String(old.otherCosts) !== String(old.xeroOtherCosts ?? "");
       const youChangedHours = old.hours !== undefined && old.hours !== "" && String(old.hours) !== String(old.xeroHours ?? "");
       const youChangedFee = old.xeroFee !== undefined && Math.round(num(old.fee)) !== Math.round(num(old.xeroFee));
       return {
         name: changed(old.name, old.xeroName) ? old.name : xc.name, xeroName: xc.name,
         type: changed(old.type, old.xeroType) ? old.type : xc.type, xeroType: xc.type,
+        freq: row.freq, xeroFreq: row.detected,
         fee: youChangedFee ? old.fee : xc.fee, xeroFee: xc.fee, origFee: xc.fee, origLabel: "Xero",
         hours: youChangedHours ? old.hours : (xc.hours !== "" ? xc.hours : (old.hours ?? "")),
         xeroHours: xc.hours,
@@ -533,7 +575,7 @@
       }
     }
     if (!store) say("Your settings are kept in this browser only.", false);
-    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && (c.xeroType === undefined || c.xeroKey === undefined))) {
+    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && (c.xeroType === undefined || c.xeroKey === undefined || c.xeroFreq === undefined))) {
       addCourseAccounts(saved.xero);
       applyXero();
       persist();
