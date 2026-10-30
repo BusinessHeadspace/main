@@ -140,6 +140,18 @@ const CAPACITY_GUIDE = {
   .note-d.warn summary { color: var(--white); background: var(--amber); font-style: normal; font-family: inherit; }
   .note-d[open] summary { box-shadow: 0 0 0 2px var(--teal); }
   .note-d summary:focus-visible { outline: 3px solid rgba(56,185,198,.5); outline-offset: 1px; }
+  .note-hide { display: block; margin-top: 6px; font-size: .78rem; }
+  .fee-cell { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+  .orig-slot { flex: none; width: 20px; }
+  .orig-d { position: relative; }
+  .orig-d summary { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; list-style: none;
+    font-size: .8rem; font-weight: 700; color: var(--white); background: var(--blue); }
+  .orig-d summary::-webkit-details-marker { display: none; }
+  .orig-d[open] summary { box-shadow: 0 0 0 2px var(--teal); }
+  .orig-d summary:focus-visible { outline: 3px solid rgba(56,185,198,.5); outline-offset: 1px; }
+  .orig-pop { position: absolute; z-index: 5; top: calc(100% + 6px); right: -8px; width: 210px; text-align: left; font-size: .8rem; color: var(--text);
+    background: var(--white); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 18px rgba(7,58,89,.15); }
+  .orig-pop .link-btn { display: block; margin-top: 6px; font-size: .8rem; }
   .note-d .row-note { position: absolute; z-index: 5; top: calc(100% + 6px); left: -8px; width: 260px; max-width: none; margin: 0;
     background: var(--white); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 18px rgba(7,58,89,.15); font-size: .8rem; }
   .reset-fee { display: block; margin-top: 3px; font-size: .72rem; white-space: nowrap; }
@@ -458,6 +470,7 @@ const CAPACITY_GUIDE = {
       <div class="toolbar no-print">
         <button class="btn btn-outline" id="catBtn" type="button" aria-pressed="false">Change categories</button>
         <button class="btn btn-outline" id="notesBtn" type="button" hidden>Show all notes</button>
+        <button class="btn btn-outline" id="restoreBtn" type="button" hidden title="Show the notes and Xero figures you've hidden">Bring back hidden</button>
         <button class="btn btn-outline" id="hoursBtn" type="button">Import hours</button>
         <button class="btn btn-teal" id="addClientBtn" type="button">+ Add client</button>
       </div>
@@ -777,6 +790,15 @@ const CAPACITY_GUIDE = {
     return `<input class="calc" type="text" inputmode="decimal" data-field="${field}" value="${escapeHtml(value ?? "")}" aria-label="${label}">`;
   }
 
+  // Notes and "back to Xero" links you've hidden. They come back on their own if the
+  // note or the original figure changes.
+  const noteShown = (c) => !!c.note && c.noteDismissed !== c.note;
+  const origKey = (c) => String(Math.round(num(c.origFee)));
+  const origDiffers = (c) => c.origFee !== undefined && c.origFee !== "" && Math.round(num(c.origFee)) !== Math.round(num(c.fee));
+  const origShown = (c) => origDiffers(c) && c.origDismissed !== origKey(c);
+  const hiddenCount = () => state.clients.reduce((n, c) =>
+    n + (c.note && c.noteDismissed === c.note ? 1 : 0) + (origDiffers(c) && c.origDismissed === origKey(c) ? 1 : 0), 0);
+
   // Which client notes are open (kept while the page is open)
   const openNotes = new Set();
   const noteKey = (c) => c.xeroContactId || String(c.name || "");
@@ -788,10 +810,10 @@ const CAPACITY_GUIDE = {
       SERVICES.map((x) => `<option value="${x.id}" ${serviceOf(c) === x.id ? "selected" : ""}>${x.label}</option>`).join("");
     return `
       <tr data-i="${i}">
-        <td><div class="name-cell"><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${c.note ? `<details class="note-d${c.noteWarn ? " warn" : ""}" data-note="${i}" ${openNotes.has(noteKey(c)) ? "open" : ""}><summary title="${escapeHtml(c.note)}" aria-label="${c.noteWarn ? "Check" : "Note"}: ${escapeHtml(c.note)}">${c.noteWarn ? "!" : "i"}</summary><div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}</div></details>` : `<span class="note-spacer"></span>`}</div></td>
+        <td><div class="name-cell"><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${noteShown(c) ? `<details class="note-d${c.noteWarn ? " warn" : ""}" data-note="${i}" ${openNotes.has(noteKey(c)) ? "open" : ""}><summary title="${escapeHtml(c.note)}" aria-label="${c.noteWarn ? "Check" : "Note"}: ${escapeHtml(c.note)}">${c.noteWarn ? "!" : "i"}</summary><div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}<button type="button" class="link-btn note-hide" data-dismiss-note="${i}">Hide this note</button></div></details>` : `<span class="note-spacer"></span>`}</div></td>
         <td class="col-cat"><select data-field="type" aria-label="Category">${opts}</select></td>
         <td><select data-field="freq" aria-label="How often they're billed">${freqOpts}</select></td>
-        <td class="num">${numInput("fee", c.fee, "Fee per bill")}<span data-out="reset"></span></td>
+        <td class="num"><div class="fee-cell"><span data-out="reset" class="orig-slot"></span>${numInput("fee", c.fee, "Fee per bill")}</div></td>
         <td class="num">${numInput("hours", c.hours, "Hours per bill")}</td>
         <td class="num">${numInput("teamHours", c.teamHours, "Team hours per bill")}</td>
         <td class="num">${numInput("otherCosts", c.otherCosts, "Other direct costs per bill")}</td>
@@ -818,8 +840,11 @@ const CAPACITY_GUIDE = {
       id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id).sort(byName)
     })).filter((g) => g.items.length);
     const heads = groups.length > 1 || groups[0].id !== "";
-    const withNotes = state.clients.filter((c) => c.note);
+    const withNotes = state.clients.filter(noteShown);
     $("notesBtn").hidden = !withNotes.length;
+    const hidden = hiddenCount();
+    $("restoreBtn").hidden = !hidden;
+    $("restoreBtn").textContent = `Bring back hidden (${hidden})`;
     $("notesBtn").textContent = withNotes.length && withNotes.every((c) => openNotes.has(noteKey(c))) ? "Hide all notes" : "Show all notes";
     els.rows.innerHTML = groups.map((g) => (heads ? `
       <tr class="group"><td colspan="${COLS}">${serviceLabel(g.id)} <span class="muted" style="font-weight:500;">(${g.items.length})</span></td></tr>` : "") +
@@ -838,8 +863,11 @@ const CAPACITY_GUIDE = {
       const a = analyse(c);
       const reset = tr.querySelector('[data-out="reset"]');
       const orig = c.origFee;
-      reset.innerHTML = orig !== undefined && orig !== "" && Math.round(num(orig)) !== Math.round(num(c.fee))
-        ? `<button type="button" class="link-btn reset-fee" data-reset-fee="${tr.dataset.i}" title="Use the ${escapeHtml(c.origLabel || "original")} figure again">↺ ${escapeHtml(c.origLabel || "Original")} ${money(num(orig))}</button>` : "";
+      const lbl = escapeHtml(c.origLabel || "Original");
+      const html = origShown(c)
+        ? `<details class="orig-d"><summary title="${lbl} figure: ${money(num(orig))}" aria-label="${lbl} figure: ${money(num(orig))}">↺</summary><div class="orig-pop">You changed this fee. The ${lbl} figure is <strong>${money(num(orig))}</strong>.<button type="button" class="link-btn" data-reset-fee="${tr.dataset.i}">Use the ${lbl} figure</button><button type="button" class="link-btn" data-dismiss-orig="${tr.dataset.i}">Hide this</button></div></details>` : "";
+      // Only redraw when it changes, so an open pop-out stays open while you type elsewhere
+      if (reset.dataset.html !== html) { reset.innerHTML = html; reset.dataset.html = html; }
       tr.querySelector('[data-out="rate"]').textContent = a.rate === null ? "—" : money(a.rate, 2);
       const label = a.status === "product" && c.type === "software" ? "Software" : STATUS_LABEL[a.status];
       tr.querySelector('[data-out="status"]').innerHTML = a.status === "none" ? '<span class="muted">—</span>' : `<span class="status ${a.status}">${label}</span>`;
@@ -1263,6 +1291,20 @@ const CAPACITY_GUIDE = {
   });
 
   els.rows.addEventListener("click", (e) => {
+    const dn = e.target.closest("[data-dismiss-note]");
+    const dorig = e.target.closest("[data-dismiss-orig]");
+    if (dn || dorig) {
+      const c = state.clients[+(dn ? dn.dataset.dismissNote : dorig.dataset.dismissOrig)];
+      if (dn) { c.noteDismissed = c.note; openNotes.delete(noteKey(c)); } else c.origDismissed = origKey(c);
+      save();
+      renderRows();
+      showUndo(dn ? "Note hidden." : "Xero figure hidden.", () => {
+        if (dn) delete c.noteDismissed; else delete c.origDismissed;
+        save();
+        renderRows();
+      });
+      return;
+    }
     const r = e.target.closest("[data-reset-fee]");
     if (r) {
       const c = state.clients[+r.dataset.resetFee];
@@ -1300,16 +1342,22 @@ const CAPACITY_GUIDE = {
     const c = state.clients[+d.dataset.note];
     if (!c) return;
     d.open ? openNotes.add(noteKey(c)) : openNotes.delete(noteKey(c));
-    const withNotes = state.clients.filter((x) => x.note);
+    const withNotes = state.clients.filter(noteShown);
     $("notesBtn").textContent = withNotes.every((x) => openNotes.has(noteKey(x))) ? "Hide all notes" : "Show all notes";
   }, true);
+  $("restoreBtn").addEventListener("click", () => {
+    state.clients.forEach((c) => { delete c.noteDismissed; delete c.origDismissed; });
+    save();
+    renderRows();
+    showFileMsg("Hidden notes and Xero figures are back.");
+  });
   $("catBtn").addEventListener("click", () => {
     const show = $("clientTable").classList.toggle("hide-cat") === false;
     $("catBtn").textContent = show ? "Done" : "Change categories";
     $("catBtn").setAttribute("aria-pressed", show);
   });
   $("notesBtn").addEventListener("click", () => {
-    const withNotes = state.clients.filter((c) => c.note);
+    const withNotes = state.clients.filter(noteShown);
     const open = !withNotes.every((c) => openNotes.has(noteKey(c)));
     withNotes.forEach((c) => (open ? openNotes.add(noteKey(c)) : openNotes.delete(noteKey(c))));
     renderRows();

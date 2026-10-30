@@ -393,6 +393,7 @@
         teamHours: old.teamHours ?? "", wip: old.wip ?? "",
         otherCosts: youChangedOther || xeroOther === undefined ? (old.otherCosts ?? "") : xeroOther, xeroOtherCosts: xeroOther,
         noReprice: !!old.noReprice,
+        noteDismissed: old.noteDismissed, origDismissed: old.origDismissed,
         note: xc.note, noteWarn: xc.noteWarn,
         source: "xero", xeroContactId: xc.cid, xeroKey: xc.id
       };
