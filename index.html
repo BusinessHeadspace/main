@@ -221,6 +221,11 @@ const CAPACITY_GUIDE = {
   .kv td { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
   .kv td.amt { text-align: right; font-weight: 600; color: var(--navy); }
 
+  .map-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 14px 0; align-items: end; }
+  .people { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 6px 0 12px; }
+  .people label { display: flex; gap: 6px; align-items: center; font-size: .85rem; cursor: pointer; }
+  .scroll-box select { padding: 4px 6px; font-size: .85rem; }
+
   .fine-print { font-size: .72rem; color: var(--muted); margin-top: 14px; }
   .print-only { display: none; }
 
@@ -378,11 +383,29 @@ const CAPACITY_GUIDE = {
   <!-- ===================== CLIENT PRICING ===================== -->
   <div data-panel="client-pricing" id="panel-client-pricing" role="tabpanel" aria-labelledby="tab-client-pricing">
 
+  <!-- Import hours from a time-tracking export -->
+  <section class="card no-print" id="hoursCard" hidden>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+      <h2>Import hours</h2>
+      <button class="btn-remove" id="hoursClose" type="button" aria-label="Close hours import">&times;</button>
+    </div>
+    <p class="muted" style="margin-top:-6px;">Export your time entries from whatever you track time in (Xero Projects, XPM, Karbon, Toggl, Harvest, Clockify or a spreadsheet) as a CSV or Excel file, covering a few full months. The file is read here in your browser and isn't uploaded anywhere.</p>
+    <input type="file" id="hoursFile" accept=".csv,.xlsx,.xls">
+    <span class="import-status" id="hoursStatus"></span>
+    <div id="hoursMap"></div>
+    <div id="hoursPreview"></div>
+    <div class="toolbar" style="margin-top:16px;">
+      <button class="btn btn-teal" id="hoursApply" type="button" disabled>Use these hours</button>
+      <button class="btn btn-outline" id="hoursCancel" type="button">Cancel</button>
+    </div>
+  </section>
+
   <!-- Clients -->
   <section class="card" id="clientsCard">
     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
       <h2 style="margin:0;">Clients</h2>
       <div class="toolbar no-print">
+        <button class="btn btn-outline" id="hoursBtn" type="button">Import hours</button>
         <button class="btn btn-teal" id="addClientBtn" type="button">+ Add client</button>
       </div>
     </div>
@@ -1011,13 +1034,20 @@ const CAPACITY_GUIDE = {
     return xlsxPromise;
   }
 
-  async function readRows(file) {
+  // Rows of the first sheet. With `both`, returns {raw, text}: raw values and the
+  // text as displayed, row for row (CSV values stay as written).
+  async function readRows(file, both) {
     const XLSX = await loadXlsx();
-    const wb = /\.csv$/i.test(file.name)
-      ? XLSX.read(await file.text(), { type: "string" })
+    const csv = /\.csv$/i.test(file.name);
+    const wb = csv
+      ? XLSX.read(await file.text(), { type: "string", raw: !!both })
       : XLSX.read(await file.arrayBuffer(), { type: "array" });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: false, defval: "" });
+    if (!both) return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: false, defval: "" });
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: true, defval: "" });
+    const text = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, blankrows: true, defval: "" });
+    const keep = raw.map((r, i) => r.some((c) => String(c).trim() !== "") ? i : -1).filter((i) => i >= 0);
+    return { raw: keep.map((i) => raw[i]), text: keep.map((i) => text[i] || []) };
   }
 
   // "1,234.50", "(120.00)", "-$80" -> number; anything else -> null
@@ -1236,6 +1266,231 @@ const CAPACITY_GUIDE = {
     if (t.dataset.owner !== undefined) { t.checked ? imp.owner.add(+t.dataset.owner) : imp.owner.delete(+t.dataset.owner); }
     if (t.dataset.include !== undefined) { t.checked ? imp.include.add(+t.dataset.include) : imp.include.delete(+t.dataset.include); }
     renderImportPreview();
+  });
+
+  // ---------- Import hours from a time-tracking export ----------
+  const hrsImp = { header: [], rows: [], text: [], cols: {}, me: new Set(), match: [], dayFirst: true };
+  const COL_GUESS = {
+    client: /^(client|client name|customer|contact|account|company|organi[sz]ation)$|client/i,
+    hours: /^(hours|duration|time|time \(h\)|decimal hours|duration \(decimal\)|duration \(h\)|billable hours|time spent|total hours)$|hours|duration/i,
+    date: /^(date|start date|day|work date|entry date|started)$|date/i,
+    person: /^(user|staff|staff member|person|team member|employee|member|name|first name)$|user|staff/i
+  };
+
+  // "1.5", "1:30", "01:30:00", "1h 30m", "90m" -> hours
+  function parseHours(v) {
+    const t = String(v ?? "").trim().toLowerCase();
+    if (!t) return 0;
+    let m = t.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
+    if (m) return +m[1] + +m[2] / 60 + (m[3] ? +m[3] / 3600 : 0);
+    m = t.match(/^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:ute)?s?)?)?$/);
+    if (m && (m[1] || m[2])) return (m[1] ? +m[1] : 0) + (m[2] ? +m[2] / 60 : 0);
+    const n = parseFloat(t.replace(/,/g, ""));
+    return isFinite(n) ? n : 0;
+  }
+
+  // Excel date numbers, ISO dates, or d/m/y and m/d/y (order decided for the whole column)
+  function parseDate(v) {
+    if (typeof v === "number" && v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 86400000));
+    const t = String(v || "").trim();
+    if (!t) return null;
+    let m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+    if (m) {
+      const y = +m[3] < 100 ? 2000 + +m[3] : +m[3];
+      const d = hrsImp.dayFirst ? new Date(y, +m[2] - 1, +m[1]) : new Date(y, +m[1] - 1, +m[2]);
+      return isNaN(d) ? null : d;
+    }
+    m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+    const d = new Date(t);
+    return isNaN(d) ? null : d;
+  }
+
+  const normName = (n) => String(n || "").toLowerCase().replace(/&/g, "and").replace(/\b(limited|ltd|llc|inc|co|company|t\/a)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+  function bestClientMatch(name) {
+    const n = normName(name);
+    if (!n) return -1;
+    let idx = state.clients.findIndex((c) => normName(c.name) === n);
+    if (idx < 0) idx = state.clients.findIndex((c) => { const m = normName(c.name); return m && (m.startsWith(n) || n.startsWith(m)); });
+    return idx;
+  }
+
+  async function handleHoursFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    setImportStatus("hoursStatus", "Reading " + file.name + "…", true);
+    try {
+      const { raw, text } = await readRows(file, true);
+      // Header row: the first row with at least two text cells
+      const hi = text.findIndex((r) => r.filter((c) => String(c).trim() && cellNum(String(c)) === null).length >= 2);
+      if (hi < 0 || raw.length - hi < 2) throw new Error("No time entries found. Check the file has a header row and one row per time entry.");
+      hrsImp.header = text[hi].map((c) => String(c).trim());
+      hrsImp.rows = raw.slice(hi + 1);
+      hrsImp.text = text.slice(hi + 1);
+      const pick = (re, not) => hrsImp.header.findIndex((h, i) => re.test(h) && !not.includes(i));
+      const c = {};
+      c.client = pick(COL_GUESS.client, []);
+      c.hours = pick(COL_GUESS.hours, [c.client]);
+      c.date = pick(COL_GUESS.date, [c.client, c.hours]);
+      c.person = pick(COL_GUESS.person, [c.client, c.hours, c.date]);
+      hrsImp.cols = c;
+      hrsImp.me = new Set();
+      setImportStatus("hoursStatus", "Read " + file.name + ": " + hrsImp.rows.length + " entries", true);
+      renderHoursMap();
+    } catch (err) {
+      hrsImp.rows = [];
+      setImportStatus("hoursStatus", /reader/i.test(err.message)
+        ? "The spreadsheet reader couldn't load. Check your internet connection and try again." : err.message, false);
+      $("hoursMap").innerHTML = "";
+      $("hoursPreview").innerHTML = "";
+      $("hoursApply").disabled = true;
+    }
+  }
+
+  function colSelect(key, label, optional) {
+    const opts = hrsImp.header.map((h, i) => `<option value="${i}" ${hrsImp.cols[key] === i ? "selected" : ""}>${escapeHtml(h || "Column " + (i + 1))}</option>`).join("");
+    return `<label class="field">${label}<select data-col="${key}">${optional ? `<option value="-1" ${hrsImp.cols[key] < 0 ? "selected" : ""}>None</option>` : ""}${opts}</select></label>`;
+  }
+
+  function renderHoursMap() {
+    $("hoursMap").innerHTML = `<div class="map-grid">
+        ${colSelect("client", "Client column")}
+        ${colSelect("hours", "Hours column")}
+        ${colSelect("date", "Date column <span class=\"hint\">(to work out the months)</span>", true)}
+        ${colSelect("person", "Person column <span class=\"hint\">(to split out team hours)</span>", true)}
+        <label class="field">Months the file covers<input type="number" id="hoursMonths" min="1" max="36" step="1"></label>
+      </div>`;
+    $("hoursMonths").value = detectMonths() || 1;
+    autoPickMe();
+    renderHoursPreview(true);
+  }
+
+  // With only one person in the file, that person is you
+  function autoPickMe() {
+    const pi = hrsImp.cols.person;
+    const names = pi >= 0 ? [...new Set(hrsImp.rows.map((r) => String(r[pi] ?? "").trim()).filter(Boolean))] : [];
+    hrsImp.me = new Set(names.length === 1 ? names : []);
+  }
+
+  function detectMonths() {
+    const di = hrsImp.cols.date;
+    if (!(di >= 0)) return null;
+    // A first part over 12 means day-first; a second part over 12 means month-first
+    const parts = hrsImp.rows.map((r) => String(r[di] || "").match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-]\d{2,4}/)).filter(Boolean);
+    hrsImp.dayFirst = !(parts.some((p) => +p[2] > 12) && !parts.some((p) => +p[1] > 12));
+    const ds = hrsImp.rows.map((r) => parseDate(r[di])).filter(Boolean);
+    if (!ds.length) return null;
+    const keys = new Set(ds.map((d) => d.getFullYear() * 12 + d.getMonth()));
+    const min = Math.min(...keys), max = Math.max(...keys);
+    return max - min + 1;
+  }
+
+  function hoursTotals() {
+    const { client, hours, person } = hrsImp.cols;
+    const by = new Map();
+    hrsImp.rows.forEach((r, i) => {
+      const name = String(r[client] ?? "").trim();
+      const h = parseHours((hrsImp.text[i] || [])[hours]);
+      if (!name || !(h > 0)) return;
+      const who = person >= 0 ? String(r[person] ?? "").trim() : "";
+      const t = by.get(name) || { name, total: 0, team: 0 };
+      t.total += h;
+      if (person >= 0 && hrsImp.me.size && who && !hrsImp.me.has(who)) t.team += h;
+      by.set(name, t);
+    });
+    return [...by.values()].sort((a, b) => b.total - a.total);
+  }
+
+  function renderHoursPreview(resetMatches) {
+    const months = Math.max(1, num($("hoursMonths") && $("hoursMonths").value) || 1);
+    const totals = hoursTotals();
+    if (resetMatches || hrsImp.match.length !== totals.length) {
+      hrsImp.match = totals.map((t) => ({ name: t.name, to: bestClientMatch(t.name) }));
+    }
+    const target = new Map(hrsImp.match.map((m) => [m.name, m.to]));
+    const pi = hrsImp.cols.person;
+    let people = "";
+    if (pi >= 0) {
+      const names = [...new Set(hrsImp.rows.map((r) => String(r[pi] ?? "").trim()).filter(Boolean))].sort();
+      people = `<p class="table-note" style="margin:0;">Tick the names that are you. Everyone else's time counts as team hours${hrsImp.me.size ? "" : " (nothing is split until you tick yourself)"}.</p>
+        <div class="people">${names.map((n) => `<label><input type="checkbox" data-me="${escapeHtml(n)}" ${hrsImp.me.has(n) ? "checked" : ""}>${escapeHtml(n)}</label>`).join("")}</div>`;
+    }
+    const clientOpts = (sel) => `<option value="-2" ${sel === -2 ? "selected" : ""}>Add as a new client</option><option value="-1" ${sel === -1 ? "selected" : ""}>Skip</option>` +
+      state.clients.map((c, i) => `<option value="${i}" ${sel === i ? "selected" : ""}>${escapeHtml(c.name || "Unnamed client")}</option>`).join("");
+    const rows = totals.map((t) => {
+      const to = target.get(t.name);
+      return `<tr><td>${escapeHtml(t.name)}</td><td><select data-match="${escapeHtml(t.name)}" aria-label="Calculator client for ${escapeHtml(t.name)}">${clientOpts(to)}</select></td>
+        <td class="num">${hrs(t.total / months, 2)}</td><td class="num">${pi >= 0 && hrsImp.me.size ? hrs(t.team / months, 2) : "—"}</td></tr>`;
+    }).join("");
+    const matched = hrsImp.match.filter((m) => m.to >= 0).length;
+    $("hoursPreview").innerHTML = totals.length ? `${people}
+      <p class="table-note" style="margin:0 0 8px;">${matched} of ${totals.length} clients in the file are matched to clients in the calculator. Check the matches, then use these hours. Hours are per month.</p>
+      <div class="scroll-box"><table><thead><tr><th>In the file</th><th>Calculator client</th><th class="num">Hours / month</th><th class="num">Team hours / month</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<p class="import-status err">No hours found with these columns. Check the client and hours columns.</p>`;
+    $("hoursApply").disabled = !hrsImp.match.some((m) => m.to !== -1);
+  }
+
+  function applyHours() {
+    const months = Math.max(1, num($("hoursMonths").value) || 1);
+    const totals = new Map(hoursTotals().map((t) => [t.name, t]));
+    const usePerson = hrsImp.cols.person >= 0 && hrsImp.me.size > 0;
+    const next = JSON.parse(JSON.stringify(state));
+    let updated = 0, added = 0;
+    hrsImp.match.forEach((m) => {
+      const t = totals.get(m.name);
+      if (!t || m.to === -1) return;
+      const h = Math.round(t.total / months * 100) / 100;
+      const team = Math.round(t.team / months * 100) / 100;
+      if (m.to === -2) {
+        next.clients.push({ name: t.name, fee: "", hours: h, teamHours: usePerson ? team : "", otherCosts: "" });
+        added++;
+      } else {
+        const c = next.clients[m.to];
+        c.hours = h;
+        if (usePerson) c.teamHours = team;
+        updated++;
+      }
+    });
+    loadData(next);
+    closeHours();
+    showFileMsg(`Imported hours for ${updated} client${updated === 1 ? "" : "s"}${added ? ` and added ${added} new client${added === 1 ? "" : "s"} (add their monthly fees)` : ""}.`);
+  }
+
+  function closeHours() {
+    $("hoursCard").hidden = true;
+    $("hoursFile").value = "";
+    $("hoursStatus").textContent = "";
+    $("hoursMap").innerHTML = "";
+    $("hoursPreview").innerHTML = "";
+    $("hoursApply").disabled = true;
+    hrsImp.rows = [];
+    hrsImp.match = [];
+  }
+
+  $("hoursBtn").addEventListener("click", () => { $("hoursCard").hidden = false; $("hoursCard").scrollIntoView({ behavior: "smooth", block: "start" }); });
+  $("hoursClose").addEventListener("click", closeHours);
+  $("hoursCancel").addEventListener("click", closeHours);
+  $("hoursApply").addEventListener("click", applyHours);
+  $("hoursFile").addEventListener("change", (e) => handleHoursFile(e.target));
+  $("hoursMap").addEventListener("change", (e) => {
+    const key = e.target.dataset.col;
+    if (key) {
+      hrsImp.cols[key] = +e.target.value;
+      if (key === "date") $("hoursMonths").value = detectMonths() || $("hoursMonths").value;
+      if (key === "person") autoPickMe();
+      renderHoursPreview(key === "client");
+    }
+  });
+  $("hoursMap").addEventListener("input", (e) => { if (e.target.id === "hoursMonths") renderHoursPreview(false); });
+  $("hoursPreview").addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.dataset.me !== undefined) { t.checked ? hrsImp.me.add(t.dataset.me) : hrsImp.me.delete(t.dataset.me); renderHoursPreview(false); }
+    if (t.dataset.match !== undefined) {
+      const m = hrsImp.match.find((x) => x.name === t.dataset.match);
+      if (m) m.to = +t.value;
+      $("hoursApply").disabled = !hrsImp.match.some((x) => x.to !== -1);
+    }
   });
 
   $("printBtn").addEventListener("click", () => window.print());
