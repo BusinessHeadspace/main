@@ -12,6 +12,7 @@
   const COURSES = /course|programme|program|membership|product/i;
   const SOFTWARE = /subs|subscription|commission|software|licen/i;
   const SOFTWARE_COSTS = /subs|subscription|software|licen|xero|myob|reckon|quickbooks|commission/i;
+  const END_RULES = 2;     // bump when the rules for spotting finished clients change, to re-apply them on load
   const SVC_LABEL = { coaching: "Coaching", consulting: "Consulting", bookkeeping: "Bookkeeping", software: "Software", course: "Courses", other: "Other" };
 
   const $ = (id) => document.getElementById(id);
@@ -387,21 +388,18 @@
     const fm = FREQ_MONTHS[freq] || 1;
     let note = "", warn = false, ends = "";
     const lastYm = Math.floor(xc.last / 12) + "-" + String(xc.last % 12 + 1).padStart(2, "0");
-    if (!adhoc && xc.repStopped) {
+    if (xc.repStopped) {
       note = `The repeating invoice has been stopped in Xero: last billed ${monthName(lastYm)}, so it ends then.`;
+      ends = lastYm;
+    } else if (xc.svc === "course" && xc.last + (adhoc ? 1 : fm) <= xc.endIdx) {
+      // A course paid for in full, or a payment plan that has stopped being billed, has finished
+      note = `Course paid for: last billed ${monthName(lastYm)}, so it ends then.`;
       ends = lastYm;
     } else if (adhoc) {
       note = `Ad hoc: billed ${money(xc.total)} in ${xc.billed} of the last ${x.months} months. Shown as a monthly average.`;
     } else if (xc.last + fm <= xc.endIdx) {
-      const ym = lastYm;
-      if (xc.svc === "course") {
-        // A course payment plan that has stopped being billed has finished
-        note = `Payment plan finished: last billed ${monthName(ym)}, so it ends then.`;
-        ends = ym;
-      } else {
-        note = `Last billed ${monthName(ym)}. If they've finished, remove them with the × at the end of the row.`;
-        warn = true;
-      }
+      note = `Last billed ${monthName(lastYm)}. If they've finished, remove them with the × at the end of the row.`;
+      warn = true;
     } else if (fm > 1) {
       note = `Billed ${FREQ_WORDS[freq]}: average of ${xc.billed} bill${xc.billed === 1 ? "" : "s"}.`;
     } else if (xc.billed < xc.active) {
@@ -654,7 +652,8 @@
       }
     }
     if (!store) say("Your settings are kept in this browser only.", false);
-    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && (c.xeroType === undefined || c.xeroKey === undefined || c.xeroFreq === undefined || c.xeroEnds === undefined))) {
+    if (saved.xero && ((window.PPC.getState().clients || []).some((c) => c.source === "xero" && (c.xeroType === undefined || c.xeroKey === undefined || c.xeroFreq === undefined || c.xeroEnds === undefined)) || saved.sync.endRules !== END_RULES)) {
+      saved.sync.endRules = END_RULES;
       addCourseAccounts(saved.xero);
       applyXero();
       persist();
