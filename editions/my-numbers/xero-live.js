@@ -372,13 +372,19 @@
     const adhoc = freq === "adhoc";
     const per = adhoc ? x.months : xc.billed;
     const fm = FREQ_MONTHS[freq] || 1;
-    let note = "", warn = false;
+    let note = "", warn = false, ends = "";
     if (adhoc) {
       note = `Ad hoc: billed ${money(xc.total)} in ${xc.billed} of the last ${x.months} months. Shown as a monthly average.`;
     } else if (xc.last + fm <= xc.endIdx) {
       const ym = Math.floor(xc.last / 12) + "-" + String(xc.last % 12 + 1).padStart(2, "0");
-      note = `Last billed ${monthName(ym)}. If they've finished, remove them with the × at the end of the row.`;
-      warn = true;
+      if (xc.svc === "course") {
+        // A course payment plan that has stopped being billed has finished
+        note = `Payment plan finished: last billed ${monthName(ym)}, so it ends then.`;
+        ends = ym;
+      } else {
+        note = `Last billed ${monthName(ym)}. If they've finished, remove them with the × at the end of the row.`;
+        warn = true;
+      }
     } else if (fm > 1) {
       note = `Billed ${FREQ_WORDS[freq]}: average of ${xc.billed} bill${xc.billed === 1 ? "" : "s"}.`;
     } else if (xc.billed < xc.active) {
@@ -389,7 +395,7 @@
       fee: Math.round(xc.total / per),
       hours: xc.hourly ? Math.round(xc.qty / per * 100) / 100 : "",
       monthly: adhoc ? xc.total / x.months : xc.total / xc.billed / fm,
-      note, warn
+      note, warn, ends
     };
   }
 
@@ -441,7 +447,8 @@
         noReprice: !!old.noReprice,
         removed: removedKeys.has(xc.id) || removedKeys.has(xc.cid) || undefined,
         noteDismissed: old.noteDismissed, origDismissed: old.origDismissed,
-        ends: old.ends || "",
+        // An end date you typed stays; one worked out from Xero follows the invoices
+        ends: old.ends && old.ends !== (old.xeroEnds || "") ? old.ends : row.bill.ends, xeroEnds: row.bill.ends,
         autoRemovedFor: old.autoRemovedFor,
         note: xc.note, noteWarn: xc.noteWarn,
         source: "xero", xeroContactId: xc.cid, xeroKey: xc.id
@@ -630,7 +637,7 @@
       }
     }
     if (!store) say("Your settings are kept in this browser only.", false);
-    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && (c.xeroType === undefined || c.xeroKey === undefined || c.xeroFreq === undefined))) {
+    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && (c.xeroType === undefined || c.xeroKey === undefined || c.xeroFreq === undefined || c.xeroEnds === undefined))) {
       addCourseAccounts(saved.xero);
       applyXero();
       persist();
