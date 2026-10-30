@@ -125,8 +125,10 @@ const CAPACITY_GUIDE = {
   #clientTable select { padding: 7px 4px; font-size: .82rem; width: 112px; }
   #clientTable select[data-field="freq"] { width: 96px; }
   #clientTable td, #clientTable th { padding-left: 5px; padding-right: 5px; }
-  #clientTable tr.group td { background: var(--cream); font-weight: 700; color: var(--navy); border-top: 2px solid var(--line); }
-  #clientTable tr.group td.num { font-variant-numeric: tabular-nums; }
+  #clientTable.hide-cat .col-cat { display: none; }
+  #clientTable tr.group td { background: var(--cream); font-weight: 700; color: var(--navy); border-top: 2px solid var(--line); padding-top: 9px; padding-bottom: 9px; }
+  #clientTable tr.group-total td { font-weight: 700; color: var(--navy); border-top: 1.5px solid var(--navy); border-bottom: 2px solid var(--line); font-variant-numeric: tabular-nums; }
+  #clientTable tr.group-total td:first-child { font-size: .8rem; font-weight: 600; color: var(--muted); }
   .row-note { font-size: .75rem; color: var(--muted); margin-top: 3px; max-width: 280px; line-height: 1.35; }
   .row-note.warn { color: var(--amber); font-weight: 600; }
   .name-cell { display: flex; align-items: center; gap: 6px; }
@@ -454,17 +456,18 @@ const CAPACITY_GUIDE = {
     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
       <h2 style="margin:0;">Clients</h2>
       <div class="toolbar no-print">
+        <button class="btn btn-outline" id="catBtn" type="button" aria-pressed="false">Change categories</button>
         <button class="btn btn-outline" id="notesBtn" type="button" hidden>Show all notes</button>
         <button class="btn btn-outline" id="hoursBtn" type="button">Import hours</button>
         <button class="btn btn-teal" id="addClientBtn" type="button">+ Add client</button>
       </div>
     </div>
     <div class="table-scroll">
-      <table id="clientTable">
+      <table id="clientTable" class="hide-cat">
         <thead>
           <tr>
             <th>Client name</th>
-            <th>Category</th>
+            <th class="col-cat">Category</th>
             <th>Billed</th>
             <th class="num">Fee per bill</th>
             <th class="num">Hours per bill</th>
@@ -487,7 +490,7 @@ const CAPACITY_GUIDE = {
       <span class="status amber">Within 15% below</span>
       <span class="status red">More than 15% below</span>
     </div>
-    <p class="table-note"><strong>Fees, hours and costs are per bill</strong>: what you charge each time you invoice, and the time that takes. Set <strong>Billed</strong> for clients you don't bill monthly (such as 2-monthly GST or 6-monthly reviews). Totals, the summary and Fill the gap convert everything to monthly. <strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses, programmes and software don't need hours.</p>
+    <p class="table-note"><strong>Fees, hours and costs are per bill</strong>: what you charge each time you invoice, and the time that takes. Set <strong>Billed</strong> for clients you don't bill monthly (such as 2-monthly GST or 6-monthly reviews). Use <strong>Change categories</strong> to move a client to another category. Totals, the summary and Fill the gap convert everything to monthly. <strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are what it costs you to serve that client each bill, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses, programmes and software don't need hours.</p>
   </section>
 
   <!-- Summary -->
@@ -563,7 +566,7 @@ const CAPACITY_GUIDE = {
   const freqLabel = (c) => (FREQS.find((f) => f.id === String(c.freq)) || FREQS[0]).label;
   const serviceOf = (c) => (SERVICES.some((x) => x.id === c.type) ? c.type : "");
   const serviceLabel = (id) => (SERVICES.find((x) => x.id === id) || { label: "Not grouped yet" }).label;
-  const COLS = 14;
+  const COLS = 13;
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -786,7 +789,7 @@ const CAPACITY_GUIDE = {
     return `
       <tr data-i="${i}">
         <td><div class="name-cell"><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${c.note ? `<details class="note-d${c.noteWarn ? " warn" : ""}" data-note="${i}" ${openNotes.has(noteKey(c)) ? "open" : ""}><summary title="${escapeHtml(c.note)}" aria-label="${c.noteWarn ? "Check" : "Note"}: ${escapeHtml(c.note)}">${c.noteWarn ? "!" : "i"}</summary><div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}</div></details>` : `<span class="note-spacer"></span>`}</div></td>
-        <td><select data-field="type" aria-label="Category">${opts}</select></td>
+        <td class="col-cat"><select data-field="type" aria-label="Category">${opts}</select></td>
         <td><select data-field="freq" aria-label="How often they're billed">${freqOpts}</select></td>
         <td class="num">${numInput("fee", c.fee, "Fee per bill")}<span data-out="reset"></span></td>
         <td class="num">${numInput("hours", c.hours, "Hours per bill")}</td>
@@ -806,20 +809,26 @@ const CAPACITY_GUIDE = {
       els.rows.innerHTML = `<tr><td colspan="${COLS}" class="empty">No clients yet. Click <strong>+ Add client</strong> or <strong>Load sample data</strong> to get started.</td></tr>`;
       return;
     }
+    const byName = (a, b) => {
+      const x = String(a.c.name || "").trim(), y = String(b.c.name || "").trim();
+      if (!x || !y) return x ? -1 : y ? 1 : 0;   // unnamed rows last
+      return x.localeCompare(y, undefined, { sensitivity: "base", numeric: true });
+    };
     const groups = SERVICES.map((x) => x.id).concat([""]).map((id) => ({
-      id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id)
+      id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id).sort(byName)
     })).filter((g) => g.items.length);
     const heads = groups.length > 1 || groups[0].id !== "";
     const withNotes = state.clients.filter((c) => c.note);
     $("notesBtn").hidden = !withNotes.length;
     $("notesBtn").textContent = withNotes.length && withNotes.every((c) => openNotes.has(noteKey(c))) ? "Hide all notes" : "Show all notes";
     els.rows.innerHTML = groups.map((g) => (heads ? `
-      <tr class="group" data-group="${g.id}">
-        <td colspan="2">${serviceLabel(g.id)} <span class="muted" style="font-weight:500;">(${g.items.length})</span></td>
-        <td class="muted" style="font-weight:500;font-size:.78rem;">per month</td>
+      <tr class="group"><td colspan="${COLS}">${serviceLabel(g.id)} <span class="muted" style="font-weight:500;">(${g.items.length})</span></td></tr>` : "") +
+      g.items.map((x) => rowHtml(x.c, x.i)).join("") + (heads ? `
+      <tr class="group-total" data-group="${g.id}">
+        <td>${serviceLabel(g.id)} total per month</td><td class="col-cat"></td><td></td>
         <td class="num" data-gout="fee"></td><td class="num" data-gout="hours"></td><td></td><td></td>
         <td class="num" data-gout="wip"></td><td class="num" data-gout="rate"></td><td colspan="${COLS - 9}"></td>
-      </tr>` : "") + g.items.map((x) => rowHtml(x.c, x.i)).join("")).join("");
+      </tr>` : "")).join("");
     updateRowOutputs();
   }
 
@@ -841,7 +850,7 @@ const CAPACITY_GUIDE = {
         ? `<span class="gp${a.grossProfit < 0 ? " loss" : ""}">${money(a.grossProfit)}<span class="pct">${a.margin === null ? "" : pct(a.margin)}</span></span>`
         : '<span class="muted">—</span>';
     });
-    els.rows.querySelectorAll("tr.group").forEach((tr) => {
+    els.rows.querySelectorAll("tr.group-total").forEach((tr) => {
       const g = serviceStats(tr.dataset.group);
       tr.querySelector('[data-gout="fee"]').textContent = money(g.fee);
       tr.querySelector('[data-gout="hours"]').textContent = g.hours ? hrs(g.hours, 1) : "";
@@ -1294,6 +1303,11 @@ const CAPACITY_GUIDE = {
     const withNotes = state.clients.filter((x) => x.note);
     $("notesBtn").textContent = withNotes.every((x) => openNotes.has(noteKey(x))) ? "Hide all notes" : "Show all notes";
   }, true);
+  $("catBtn").addEventListener("click", () => {
+    const show = $("clientTable").classList.toggle("hide-cat") === false;
+    $("catBtn").textContent = show ? "Done" : "Change categories";
+    $("catBtn").setAttribute("aria-pressed", show);
+  });
   $("notesBtn").addEventListener("click", () => {
     const withNotes = state.clients.filter((c) => c.note);
     const open = !withNotes.every((c) => openNotes.has(noteKey(c)));
