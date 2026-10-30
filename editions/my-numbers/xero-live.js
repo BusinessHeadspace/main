@@ -75,8 +75,8 @@
           <h3>Your own pay</h3>
           <p class="table-note" style="margin-top:0;">Expense accounts that are your pay. They're left out of overheads.</p>
           <div id="xeroOwner" class="muted" style="font-size:.85rem;">Refresh to see your accounts.</div>
-          <h3 style="margin-top:14px;">Hidden clients</h3>
-          <div id="xeroHidden" class="muted" style="font-size:.85rem;">None. Removing a Xero client from the table hides it from future refreshes.</div>
+          <h3 style="margin-top:14px;">Removed clients</h3>
+          <div id="xeroHidden" class="muted" style="font-size:.85rem;">None. Clients you remove with × are listed under Removed above the table, where you can put them back.</div>
         </div>
       </div>
     </details>`;
@@ -266,19 +266,17 @@
   // doesn't drag the average down; ad hoc clients over the whole period.
   function clientsFrom(x) {
     const fee = new Set(saved.sync.feeCodes || []);
-    const hidden = new Set(saved.sync.hidden.map((h) => h.id));
     const names = new Map(x.accounts.map((a) => [a.code, a.name]));
     const end = new Date(x.winEnd + "T00:00:00");
     const lastMonth = x.winEnd.slice(0, 7);
     const by = new Map();
     x.invoices.forEach((inv) => {
       const cid = inv.contact && inv.contact.contact_id;
-      if (!cid || hidden.has(cid)) return;
+      if (!cid) return;
       (inv.line_items || []).forEach((l) => {
         if (!fee.has(l.account_code) || l.line_amount_net_base_currency == null) return;
         const svc = serviceFromAccount(names.get(l.account_code) || "");
         const key = cid + ":" + svc;
-        if (hidden.has(key)) return;
         const c = by.get(key) || { id: key, cid, svc, name: inv.contact.name, total: 0, qty: 0, hourly: false, first: inv.invoice_date, last: inv.invoice_date, months: new Set() };
         c.total += num(l.line_amount_net_base_currency);
         const q = num(l.quantity);
@@ -372,7 +370,8 @@
       const freq = changed(old.freq, old.xeroFreq) ? String(old.freq) : xc.freq;
       return Object.assign(xc, { old, detected: xc.freq, freq, bill: perBill(xc, freq, x) });
     });
-    const softRows = rows.filter((r) => r.type === "software");
+    const removedKeys = new Set((saved.sync.hidden || []).map((h) => h.id));
+    const softRows = rows.filter((r) => r.type === "software" && !removedKeys.has(r.id) && !removedKeys.has(r.cid));
     const softMonthly = softRows.reduce((t, r) => t + r.bill.monthly, 0);
     const softCost = softwareCost(x);
     const fresh = rows.map((row) => {
@@ -393,6 +392,7 @@
         teamHours: old.teamHours ?? "", wip: old.wip ?? "",
         otherCosts: youChangedOther || xeroOther === undefined ? (old.otherCosts ?? "") : xeroOther, xeroOtherCosts: xeroOther,
         noReprice: !!old.noReprice,
+        removed: removedKeys.has(xc.id) || removedKeys.has(xc.cid) || undefined,
         noteDismissed: old.noteDismissed, origDismissed: old.origDismissed,
         ends: old.ends || "",
         note: xc.note, noteWarn: xc.noteWarn,
@@ -482,7 +482,7 @@
     const h = saved.sync.hidden;
     $("xeroHidden").innerHTML = h.length
       ? h.map((c) => esc(c.name)).join(", ") + ` <button type="button" class="link-btn" id="xeroUnhide">Show them again</button>`
-      : "None. Removing a Xero client from the table hides it from future refreshes.";
+      : "None. Clients you remove with × are listed under Removed above the table, where you can put them back.";
   }
 
   function renderYtd() {

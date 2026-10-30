@@ -290,6 +290,10 @@ const CAPACITY_GUIDE = {
   .people label { display: flex; gap: 6px; align-items: center; font-size: .85rem; cursor: pointer; }
   .scroll-box select { padding: 4px 6px; font-size: .85rem; }
 
+  .removed-panel { border: 1px solid var(--line); border-radius: 10px; background: var(--cream); padding: 12px 14px; margin: 0 0 14px; font-size: .9rem; }
+  .removed-panel ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; }
+  .removed-panel li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+
   .fine-print { font-size: .72rem; color: var(--muted); margin-top: 14px; }
   .print-only { display: none; }
 
@@ -401,7 +405,7 @@ const CAPACITY_GUIDE = {
         <input class="calc" type="text" inputmode="decimal" id="rateBookkeeping" placeholder="Same as overall">
       </label>
     </div>
-    <p class="calc-tip no-print">Tip: any number box works as a calculator. Type a sum like 3.5+2.25 or 12*1.5 and press Enter.</p>
+    <p class="calc-tip no-print">Tip: any number box works as a calculator. Type a sum like 1100-166 or 12*1.5 and press Enter. Answers round to whole numbers, except hours.</p>
   </section>
 
   <nav class="tabs no-print" role="tablist" aria-label="Calculator sections">
@@ -482,6 +486,7 @@ const CAPACITY_GUIDE = {
     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
       <h2 style="margin:0;">Clients</h2>
       <div class="toolbar no-print">
+        <button class="btn btn-outline" id="removedBtn" type="button" hidden aria-expanded="false" aria-controls="removedPanel">Removed</button>
         <button class="btn btn-outline" id="adhocBtn" type="button" hidden>Remove ad hoc</button>
         <button class="btn btn-outline" id="catBtn" type="button" aria-pressed="false">Change categories</button>
         <button class="btn btn-outline" id="notesBtn" type="button" hidden>Show all notes</button>
@@ -490,6 +495,7 @@ const CAPACITY_GUIDE = {
         <button class="btn btn-teal" id="addClientBtn" type="button">+ Add client</button>
       </div>
     </div>
+    <div class="removed-panel no-print" id="removedPanel" hidden></div>
     <div class="table-scroll">
       <table id="clientTable" class="hide-cat">
         <thead>
@@ -613,7 +619,7 @@ const CAPACITY_GUIDE = {
   }
   const ended = (c) => !!c.ends && monthIdx(c.ends) < nowIdx;
   const isAdhoc = (c) => String(c.freq) === "adhoc";
-  const leftOut = (c) => ended(c) || (!!state.hideAdhoc && isAdhoc(c));
+  const leftOut = (c) => !!c.removed || ended(c) || (!!state.hideAdhoc && isAdhoc(c));
   const activeIn = (c, i) => !c.ends || monthIdx(c.ends) >= i;
   // Months billed in the next 12, counting this month
   const monthsLeft = (c) => (c.ends ? Math.max(0, Math.min(12, monthIdx(c.ends) - nowIdx + 1)) : 12);
@@ -641,7 +647,7 @@ const CAPACITY_GUIDE = {
   };
 
   // Calculator for number boxes: "3.5+2", "12*1.5", "(400-50)/2" -> number; null if not a sum
-  function evalSum(src) {
+  function evalSum(src, decimals) {
     const t = String(src ?? "").replace(/^=/, "").replace(/[\s$,]/g, "").replace(/×/g, "*").replace(/÷/g, "/");
     if (!/^[-+*/().\d]+$/.test(t) || !/[-+*/]/.test(t.replace(/^-/, ""))) return null;
     let i = 0;
@@ -658,7 +664,8 @@ const CAPACITY_GUIDE = {
     const expr = () => { let v = term(); while (t[i] === "+" || t[i] === "-") { const op = t[i++]; const r = term(); v = op === "+" ? v + r : v - r; } return v; };
     try {
       const v = expr();
-      return i === t.length && isFinite(v) ? Math.round(v * 100) / 100 : null;
+      const f = Math.pow(10, decimals === undefined ? 2 : decimals);
+      return i === t.length && isFinite(v) ? Math.round(v * f) / f : null;
     } catch (e) { return null; }
   }
 
@@ -845,7 +852,7 @@ const CAPACITY_GUIDE = {
   const origKey = (c) => String(Math.round(num(c.origFee)));
   const origDiffers = (c) => c.origFee !== undefined && c.origFee !== "" && Math.round(num(c.origFee)) !== Math.round(num(c.fee));
   const origShown = (c) => origDiffers(c) && c.origDismissed !== origKey(c);
-  const hiddenCount = () => state.clients.reduce((n, c) =>
+  const hiddenCount = () => state.clients.filter((c) => !c.removed).reduce((n, c) =>
     n + (c.note && c.noteDismissed === c.note ? 1 : 0) + (origDiffers(c) && c.origDismissed === origKey(c) ? 1 : 0), 0);
 
   // Which client notes are open (kept while the page is open)
@@ -890,19 +897,20 @@ const CAPACITY_GUIDE = {
       if (!x || !y) return x ? -1 : y ? 1 : 0;   // unnamed rows last
       return x.localeCompare(y, undefined, { sensitivity: "base", numeric: true });
     };
-    const adhoc = state.clients.filter(isAdhoc).length;
+    renderRemovedPanel();
+    const adhoc = state.clients.filter((c) => isAdhoc(c) && !c.removed).length;
     $("adhocBtn").hidden = !adhoc;
     $("adhocBtn").textContent = state.hideAdhoc ? `Show ad hoc (${adhoc})` : `Remove ad hoc (${adhoc})`;
     $("adhocBtn").setAttribute("aria-pressed", !!state.hideAdhoc);
     const groups = SERVICES.map((x) => x.id).concat([""]).map((id) => ({
-      id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id && !(state.hideAdhoc && isAdhoc(x.c))).sort(byName)
+      id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id && !x.c.removed && !(state.hideAdhoc && isAdhoc(x.c))).sort(byName)
     })).filter((g) => g.items.length);
     if (!groups.length) {
-      els.rows.innerHTML = `<tr><td colspan="${COLS}" class="empty">Every client here is ad hoc. Click <strong>Show ad hoc</strong> to see them.</td></tr>`;
+      els.rows.innerHTML = `<tr><td colspan="${COLS}" class="empty">No clients to show. Use <strong>Removed</strong> or <strong>Show ad hoc</strong> above to bring clients back.</td></tr>`;
       return;
     }
     const heads = groups.length > 1 || groups[0].id !== "";
-    const withNotes = state.clients.filter(noteShown);
+    const withNotes = state.clients.filter((c) => noteShown(c) && !c.removed);
     $("notesBtn").hidden = !withNotes.length;
     const hidden = hiddenCount();
     $("restoreBtn").hidden = !hidden;
@@ -953,7 +961,7 @@ const CAPACITY_GUIDE = {
   function forecastHtml() {
     const months = Array.from({ length: 12 }, (_, k) => nowIdx + k);
     const vals = months.map((i) => state.clients.reduce((t, c) => {
-      if (!activeIn(c, i) || (state.hideAdhoc && isAdhoc(c))) return t;
+      if (!activeIn(c, i) || c.removed || (state.hideAdhoc && isAdhoc(c))) return t;
       return t + num(c.fee) / freqMonths(c);
     }, 0));
     const max = Math.max(...vals, 1);
@@ -1269,8 +1277,10 @@ const CAPACITY_GUIDE = {
 
   // ---------- events ----------
   // Calculator: a sum in any number box is worked out on Enter or when you leave the box
+  // Sums round to whole numbers, except hours (to two decimal places, so a quarter hour still counts)
+  const HOUR_FIELDS = ["hours", "teamHours"];
   function settleSum(el) {
-    const v = evalSum(el.value);
+    const v = evalSum(el.value, HOUR_FIELDS.includes(el.dataset.field) ? 2 : 0);
     if (v === null) return;
     el.value = String(v);
     el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1411,25 +1421,39 @@ const CAPACITY_GUIDE = {
     }
     const btn = e.target.closest("[data-remove]");
     if (!btn) return;
-    const at = +btn.dataset.remove;
-    const removed = state.clients.splice(at, 1)[0];
-    try {
-      if (window.PPC && typeof window.PPC.onRemoveClient === "function") window.PPC.onRemoveClient(removed);
-    } catch (err) { /* the row is still removed */ }
-    save();
-    renderRows();
-    renderOutputs();
-    showUndo(`Removed ${removed && removed.name ? removed.name : "the client"}.`, () => {
-      state.clients.splice(Math.min(at, state.clients.length), 0, removed);
-      try {
-        if (window.PPC && typeof window.PPC.onRestoreClient === "function") window.PPC.onRestoreClient(removed);
-      } catch (err) { /* still restored */ }
-      save();
-      renderRows();
-      renderOutputs();
+    const removed = state.clients[+btn.dataset.remove];
+    setRemoved(removed, true);
+    showUndo(`Removed ${removed && removed.name ? removed.name : "the client"}. Find it under Removed above the table.`, () => {
+      setRemoved(removed, false);
       showFileMsg(`Put ${removed && removed.name ? removed.name : "the client"} back.`);
     });
   });
+
+  // Removing sets a client aside (kept, but out of the table and totals) so it can be put back
+  function setRemoved(c, on) {
+    if (!c) return;
+    if (on) c.removed = true; else delete c.removed;
+    try {
+      const hook = window.PPC && window.PPC[on ? "onRemoveClient" : "onRestoreClient"];
+      if (typeof hook === "function") hook(c);
+    } catch (err) { /* the client is still removed or put back */ }
+    save();
+    renderRows();
+    renderOutputs();
+  }
+
+  function renderRemovedPanel() {
+    const list = state.clients.map((c, i) => ({ c, i })).filter((x) => x.c.removed);
+    $("removedBtn").hidden = !list.length;
+    $("removedBtn").textContent = `Removed (${list.length})`;
+    const panel = $("removedPanel");
+    if (!list.length) { panel.hidden = true; $("removedBtn").setAttribute("aria-expanded", "false"); return; }
+    list.sort((a, b) => String(a.c.name || "").localeCompare(String(b.c.name || ""), undefined, { sensitivity: "base" }));
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <strong>Removed clients</strong><button type="button" class="link-btn" data-restore-all>Put all back</button></div>
+      <p class="table-note" style="margin:4px 0 8px;">These are left out of the table and all totals, and stay out when you refresh.</p>
+      <ul>${list.map((x) => `<li><span>${escapeHtml(x.c.name || "Unnamed client")}${serviceOf(x.c) ? ` <span class="muted">· ${serviceLabel(serviceOf(x.c))}</span>` : ""}</span><button type="button" class="link-btn" data-restore="${x.i}">Put back</button></li>`).join("")}</ul>`;
+  }
 
   els.rows.addEventListener("toggle", (e) => {
     const d = e.target;
@@ -1445,6 +1469,31 @@ const CAPACITY_GUIDE = {
     save();
     renderRows();
     showFileMsg("Hidden notes and Xero figures are back.");
+  });
+  $("removedBtn").addEventListener("click", () => {
+    const panel = $("removedPanel");
+    panel.hidden = !panel.hidden;
+    $("removedBtn").setAttribute("aria-expanded", String(!panel.hidden));
+  });
+  $("removedPanel").addEventListener("click", (e) => {
+    const one = e.target.closest("[data-restore]");
+    if (one) {
+      const c = state.clients[+one.dataset.restore];
+      setRemoved(c, false);
+      showFileMsg(`Put ${c && c.name ? c.name : "the client"} back.`);
+      return;
+    }
+    if (e.target.closest("[data-restore-all]")) {
+      const list = state.clients.filter((c) => c.removed);
+      list.forEach((c) => {
+        delete c.removed;
+        try { if (window.PPC && typeof window.PPC.onRestoreClient === "function") window.PPC.onRestoreClient(c); } catch (err) { /* still restored */ }
+      });
+      save();
+      renderRows();
+      renderOutputs();
+      showFileMsg(`Put ${list.length} client${list.length === 1 ? "" : "s"} back.`);
+    }
   });
   $("adhocBtn").addEventListener("click", () => {
     state.hideAdhoc = !state.hideAdhoc;
@@ -1952,7 +2001,7 @@ const CAPACITY_GUIDE = {
         <div class="people">${names.map((n) => `<label><input type="checkbox" data-me="${escapeHtml(n)}" ${hrsImp.me.has(n) ? "checked" : ""}>${escapeHtml(n)}</label>`).join("")}</div>`;
     }
     const clientOpts = (sel) => `<option value="-2" ${sel === -2 ? "selected" : ""}>Add as a new client</option><option value="-1" ${sel === -1 ? "selected" : ""}>Skip</option>` +
-      state.clients.map((c, i) => `<option value="${i}" ${sel === i ? "selected" : ""}>${escapeHtml(c.name || "Unnamed client")}</option>`).join("");
+      state.clients.map((c, i) => (c.removed ? "" : `<option value="${i}" ${sel === i ? "selected" : ""}>${escapeHtml(c.name || "Unnamed client")}</option>`)).join("");
     const rows = totals.map((t) => {
       const to = target.get(t.name);
       return `<tr><td>${escapeHtml(t.name)}</td><td><select data-match="${escapeHtml(t.name)}" aria-label="Calculator client for ${escapeHtml(t.name)}">${clientOpts(to)}</select></td>
