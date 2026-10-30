@@ -1,0 +1,433 @@
+/* Live Xero add-on for the Pricing & Profit Calculator (private "My numbers" edition).
+   Runs only inside a claude.ai artifact: it reads Xero through the viewer's own
+   Xero connector (mcp capability) and keeps the viewer's settings in their private
+   artifact storage (db + user capabilities). The calculator itself is unchanged and
+   is reached through window.PPC. */
+(function () {
+  "use strict";
+
+  const SERVER = "Xero";
+  const OWNER_PAY = /shareholder'?s? salar|owner'?s? (salary|wages|pay)|director'?s? (fees|salary)|drawings|proprietor/i;
+  const NOT_FEES = /subs|commission|course|affiliate|reimburs|travel|music|interest|other revenue/i;
+
+  const $ = (id) => document.getElementById(id);
+  const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  const money = (v, d) => window.PPC.money(v, d);
+  const fmtDate = (t) => new Date(t).toLocaleString("en-NZ", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+
+  // Saved per viewer: the calculator state plus this add-on's settings and last Xero pull
+  let store = null;        // db document ref
+  let saved = { sync: { months: 3, feeCodes: null, ownerAccounts: null, hidden: [] }, xero: null };
+  let mcp = null;
+  let busy = false;
+  let writeTimer = null;
+
+  // ---------- UI ----------
+  const style = document.createElement("style");
+  style.textContent = `
+    .xero-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+    .xero-bar .who { font-weight: 600; color: var(--navy); }
+    .xero-bar .when { font-size: .85rem; color: var(--muted); }
+    .xero-msg { margin: 10px 0 0; font-size: .9rem; }
+    .xero-msg.err { color: var(--red); }
+    .xero-settings { margin-top: 14px; }
+    .xero-settings summary { cursor: pointer; font-weight: 600; color: var(--blue); font-size: .9rem; }
+    .xero-settings .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 12px; }
+    .xero-settings .cols > div { min-width: 0; }
+    .xero-settings h3 { font-size: .9rem; margin-bottom: 6px; }
+    .xero-settings label.chk { display: flex; gap: 8px; align-items: center; font-size: .85rem; padding: 3px 0; cursor: pointer; }
+    .ytd-pace { display: grid; gap: 6px; margin: 4px 0 16px; }
+    .ytd-pace .bar { position: relative; }
+    .ytd-pace .marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--navy); }
+  `;
+  document.head.appendChild(style);
+
+  const card = document.createElement("section");
+  card.className = "card no-print";
+  card.id = "xeroCard";
+  card.innerHTML = `
+    <div class="xero-bar">
+      <div><div class="who" id="xeroWho">Xero</div><div class="when" id="xeroWhen">Connecting…</div></div>
+      <div class="toolbar"><button class="btn btn-teal" id="xeroRefresh" type="button" disabled>Refresh from Xero</button></div>
+    </div>
+    <p class="xero-msg" id="xeroMsg" role="status" hidden></p>
+    <details class="xero-settings" id="xeroSettings">
+      <summary>What comes in from Xero</summary>
+      <div class="cols">
+        <div>
+          <h3>Client fees</h3>
+          <label class="field" style="max-width:240px;">Average over the last
+            <select id="xeroMonths"><option value="3">3 full months</option><option value="6">6 full months</option><option value="12">12 full months</option></select>
+          </label>
+          <p class="table-note">Income accounts that count as client fees:</p>
+          <div id="xeroFeeCodes" class="muted" style="font-size:.85rem;">Refresh to see your accounts.</div>
+        </div>
+        <div>
+          <h3>Your own pay</h3>
+          <p class="table-note" style="margin-top:0;">Expense accounts that are your pay. They're left out of overheads.</p>
+          <div id="xeroOwner" class="muted" style="font-size:.85rem;">Refresh to see your accounts.</div>
+          <h3 style="margin-top:14px;">Hidden clients</h3>
+          <div id="xeroHidden" class="muted" style="font-size:.85rem;">None. Removing a Xero client from the table hides it from future refreshes.</div>
+        </div>
+      </div>
+    </details>`;
+  const fileMsg = $("fileMsg");
+  fileMsg.parentNode.insertBefore(card, fileMsg.nextSibling);
+
+  const ytdCard = document.createElement("section");
+  ytdCard.className = "card";
+  ytdCard.innerHTML = `<h2>This year so far</h2><div id="ytdBody"><p class="muted">Refresh from Xero to see how this financial year is tracking.</p></div>`;
+  const compareCard = $("ptCompare").closest(".card");
+  compareCard.parentNode.insertBefore(ytdCard, compareCard);
+
+  function say(text, isError) {
+    const el = $("xeroMsg");
+    el.textContent = text;
+    el.className = "xero-msg" + (isError ? " err" : "");
+    el.hidden = !text;
+  }
+
+  function errorText(err) {
+    switch (err && err.code) {
+      case "needs_reauth": return "Your Xero connection has expired. Reconnect Xero in claude.ai Settings → Connectors, then refresh.";
+      case "server_not_connected": return "Xero isn't connected to your Claude account. Add it in claude.ai Settings → Connectors, then refresh.";
+      case "selection_required": return "You have more than one Xero connector. Choose which one this page should use when claude.ai asks, then refresh.";
+      case "not_in_manifest":
+      case "approval_required":
+      case "consent_required": return "This page needs your permission to read Xero. Click Refresh from Xero and choose Allow.";
+      case "blocked_by_policy": return "Your organisation's settings don't allow this page to use Xero.";
+      case "server_unavailable":
+      case "rate_limited": return "Xero didn't respond. Wait a minute and refresh again.";
+      case "tool_error": return "Xero returned an error: " + (err.message || "unknown error") + ".";
+      case "not_granted":
+      case "capability_disabled":
+      case "capability_removed": return "The Xero connection isn't available in this view. Open this page in claude.ai.";
+      default: return "Something went wrong reading Xero" + (err && err.message ? ": " + err.message : "") + ". Try refreshing again.";
+    }
+  }
+
+  // ---------- Saving ----------
+  function persist() {
+    if (!store) return;
+    clearTimeout(writeTimer);
+    writeTimer = setTimeout(async () => {
+      try {
+        await store.set({ state: window.PPC.getState(), sync: saved.sync, xero: saved.xero, savedAt: Date.now() });
+      } catch (e) {
+        say("Your changes couldn't be saved to your account just now. They're still kept in this browser.", true);
+      }
+    }, 1200);
+  }
+
+  window.PPC.onChange = () => { persist(); renderYtd(); };
+  window.PPC.onRemoveClient = (c) => {
+    if (c && c.source === "xero" && c.xeroContactId && !saved.sync.hidden.some((h) => h.id === c.xeroContactId)) {
+      saved.sync.hidden.push({ id: c.xeroContactId, name: c.name });
+      renderSettings();
+    }
+  };
+
+  // ---------- Xero ----------
+  async function call(tool, input) {
+    const res = await mcp.callTool(SERVER, tool, input, { cache: false });
+    return res.payload;
+  }
+
+  async function fetchAll() {
+    const orgs = (await call("get_connected_organisations", {})).organisations || [];
+    if (!orgs.length) throw { code: "tool_error", message: "no Xero organisation is connected" };
+    const org = orgs.find((o) => saved.xero && o.organisation_id === saved.xero.orgId) || orgs[0];
+    const id = org.organisation_id;
+
+    const fy = await call("get_organisation_financial_year", { organisation_id: id });
+    const fyStart = new Date(fy.financial_year_start_date + "T00:00:00");
+    const lastStart = new Date(fyStart); lastStart.setFullYear(fyStart.getFullYear() - 1);
+    const lastEnd = new Date(fyStart); lastEnd.setDate(lastEnd.getDate() - 1);
+    const today = new Date();
+
+    const months = +saved.sync.months || 3;
+    const winEnd = new Date(today.getFullYear(), today.getMonth(), 0);           // last day of last month
+    const winStart = new Date(today.getFullYear(), today.getMonth() - months, 1);
+
+    const [lastYear, ytd, chart] = await Promise.all([
+      call("get_profit_and_loss", { organisation_id: id, start_date: iso(lastStart), end_date: iso(lastEnd) }),
+      call("get_profit_and_loss", { organisation_id: id, start_date: iso(fyStart), end_date: iso(today) }),
+      call("get_chart_of_accounts", { organisation_id: id })
+    ]);
+
+    const invoices = [];
+    for (let page = 1; page <= 40; page++) {
+      const res = await call("get_invoices", {
+        organisation_id: id, issued_date_start: iso(winStart), issued_date_end: iso(winEnd),
+        include_line_items: true, page
+      });
+      invoices.push(...(res.invoices || []));
+      if (!res.total_page_count || page >= res.total_page_count) break;
+    }
+
+    // Keep only what the calculator uses, so the saved copy stays small
+    const slimPnl = (r) => ({
+      current_pnl: r.current_pnl,
+      expense_accounts: { all_accounts: ((r.expense_accounts && r.expense_accounts.all_accounts) || [])
+        .filter((a) => num(a.current_balance) !== 0)
+        .map((a) => ({ account_name: a.account_name, current_balance: a.current_balance })) }
+    });
+    const slimInvoices = invoices.map((inv) => ({
+      contact: { contact_id: inv.contact && inv.contact.contact_id, name: inv.contact && inv.contact.name },
+      invoice_date: inv.invoice_date,
+      line_items: (inv.line_items || []).filter((l) => l.account_code).map((l) => ({
+        account_code: l.account_code, quantity: l.quantity, line_amount_net_base_currency: l.line_amount_net_base_currency
+      }))
+    }));
+    const used = new Set();
+    slimInvoices.forEach((inv) => inv.line_items.forEach((l) => used.add(l.account_code)));
+    return {
+      orgId: id, orgName: org.name, fyStart: iso(fyStart), lastStart: iso(lastStart), lastEnd: iso(lastEnd),
+      winStart: iso(winStart), winEnd: iso(winEnd), months, lastYear: slimPnl(lastYear), ytd: slimPnl(ytd),
+      accounts: (chart.accounts || []).filter((a) => used.has(a.code)).map((a) => ({ code: a.code, name: a.name, type: a.type })),
+      invoices: slimInvoices
+    };
+  }
+
+  // Income accounts that appear on invoice lines, with their names
+  function invoiceAccounts(x) {
+    const names = new Map(x.accounts.map((a) => [a.code, a]));
+    const codes = new Map();
+    x.invoices.forEach((inv) => (inv.line_items || []).forEach((l) => {
+      if (l.account_code && !codes.has(l.account_code)) codes.set(l.account_code, names.get(l.account_code) || { code: l.account_code, name: "Account " + l.account_code, type: "" });
+    }));
+    return [...codes.values()].sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
+  }
+
+  function defaultFeeCodes(x) {
+    return invoiceAccounts(x).filter((a) => a.type === "REVENUE" && !NOT_FEES.test(a.name)).map((a) => a.code);
+  }
+
+  function expenseLines(x) {
+    return ((x.lastYear.expense_accounts && x.lastYear.expense_accounts.all_accounts) || [])
+      .filter((a) => num(a.current_balance) !== 0).map((a) => a.account_name);
+  }
+
+  function ownerPay(pnl) {
+    const owner = new Set(saved.sync.ownerAccounts || []);
+    return ((pnl.expense_accounts && pnl.expense_accounts.all_accounts) || [])
+      .reduce((t, a) => t + (owner.has(a.account_name) ? num(a.current_balance) : 0), 0);
+  }
+
+  // Client fees and hours from invoice lines in the window
+  function clientsFrom(x) {
+    const fee = new Set(saved.sync.feeCodes || []);
+    const hidden = new Set(saved.sync.hidden.map((h) => h.id));
+    const end = new Date(x.winEnd + "T00:00:00");
+    const by = new Map();
+    x.invoices.forEach((inv) => {
+      const cid = inv.contact && inv.contact.contact_id;
+      if (!cid || hidden.has(cid)) return;
+      const lines = (inv.line_items || []).filter((l) => fee.has(l.account_code) && l.line_amount_net_base_currency != null);
+      if (!lines.length) return;
+      const c = by.get(cid) || { id: cid, name: inv.contact.name, total: 0, qty: 0, hourly: false, first: inv.invoice_date };
+      lines.forEach((l) => {
+        c.total += num(l.line_amount_net_base_currency);
+        const q = num(l.quantity);
+        c.qty += q;
+        if (l.quantity != null && q !== 1) c.hourly = true;
+      });
+      if (inv.invoice_date < c.first) c.first = inv.invoice_date;
+      by.set(cid, c);
+    });
+    return [...by.values()].filter((c) => c.total > 0).map((c) => {
+      const f = new Date(c.first + "T00:00:00");
+      const active = Math.max(1, Math.min(x.months, (end.getFullYear() - f.getFullYear()) * 12 + end.getMonth() - f.getMonth() + 1));
+      return {
+        id: c.id, name: c.name,
+        fee: Math.round(c.total / active),
+        hours: c.hourly ? Math.round(c.qty / active * 100) / 100 : ""
+      };
+    }).sort((a, b) => b.fee - a.fee);
+  }
+
+  // Merge Xero figures into the calculator, keeping what you've entered yourself
+  function applyXero() {
+    const x = saved.xero;
+    if (!x) return;
+    const s = window.PPC.getState();
+    const prev = s.clients || [];
+    const byId = new Map(prev.filter((c) => c.xeroContactId).map((c) => [c.xeroContactId, c]));
+    const byName = new Map(prev.map((c) => [String(c.name || "").trim().toLowerCase(), c]));
+    const fresh = clientsFrom(x).map((xc) => {
+      const old = byId.get(xc.id) || byName.get(xc.name.toLowerCase()) || {};
+      const youChangedHours = old.hours !== undefined && old.hours !== "" && String(old.hours) !== String(old.xeroHours ?? "");
+      return {
+        name: xc.name, fee: xc.fee,
+        hours: youChangedHours ? old.hours : (xc.hours !== "" ? xc.hours : (old.hours ?? "")),
+        xeroHours: xc.hours,
+        teamHours: old.teamHours ?? "", otherCosts: old.otherCosts ?? "",
+        source: "xero", xeroContactId: xc.id
+      };
+    });
+    const freshNames = new Set(fresh.map((c) => c.name.toLowerCase()));
+    const manual = prev.filter((c) => c.source !== "xero" && !freshNames.has(String(c.name || "").trim().toLowerCase()));
+    s.clients = fresh.concat(manual);
+
+    const p = x.lastYear.current_pnl;
+    const income = num(p.total_income), cos = num(p.total_cost_of_sales);
+    const owner = ownerPay(x.lastYear);
+    if (income > 0) {
+      if (s.pt.basis === "month") {
+        s.pt.netProfit = s.pt.netProfit === "" ? "" : String(Math.round(num(s.pt.netProfit) * 12));
+        s.pt.basis = "year";
+      }
+      s.pt.overheads = String(Math.round(num(p.total_expenses) - owner));
+      s.pt.gpPct = String(Math.round((income - cos) / income * 100));
+      if (!(num(s.pt.netProfit) > 0)) s.pt.netProfit = String(Math.round(num(p.net_profit) + owner));
+    }
+    if (!s.currency) s.currency = "NZD";
+    s.dataNote = `Live from Xero (${x.orgName}). Overheads and gross profit % come from the year to ${new Date(x.lastEnd + "T00:00:00").toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" })}. Client fees are monthly averages from invoices issued over the last ${x.months} full months, excluding GST. Hours come from invoice quantities where you bill by the hour.`;
+    window.PPC.setState(s);
+  }
+
+  async function refresh() {
+    if (busy || !mcp) return;
+    busy = true;
+    $("xeroRefresh").disabled = true;
+    $("xeroRefresh").textContent = "Refreshing…";
+    say("");
+    try {
+      const x = await fetchAll();
+      x.refreshedAt = Date.now();
+      saved.xero = x;
+      if (!saved.sync.feeCodes) saved.sync.feeCodes = defaultFeeCodes(x);
+      if (!saved.sync.ownerAccounts) saved.sync.ownerAccounts = expenseLines(x).filter((n) => OWNER_PAY.test(n));
+      applyXero();
+      renderHeader();
+      renderSettings();
+      renderYtd();
+      persist();
+      say(`Refreshed. ${x.invoices.length} invoices read from ${x.orgName}.`);
+    } catch (err) {
+      say(errorText(err), true);
+    } finally {
+      busy = false;
+      $("xeroRefresh").disabled = false;
+      $("xeroRefresh").textContent = "Refresh from Xero";
+    }
+  }
+
+  // ---------- Rendering ----------
+  function renderHeader() {
+    const x = saved.xero;
+    $("xeroWho").textContent = x ? "Xero: " + x.orgName : "Xero";
+    $("xeroWhen").textContent = x ? "Last refreshed " + fmtDate(x.refreshedAt) : (mcp ? "Not refreshed yet. Your first refresh asks for permission to read Xero." : "The Xero connection isn't available in this view. Open this page in claude.ai.");
+  }
+
+  function renderSettings() {
+    const x = saved.xero;
+    if (x) {
+      const fee = new Set(saved.sync.feeCodes || []);
+      $("xeroFeeCodes").innerHTML = invoiceAccounts(x).map((a) =>
+        `<label class="chk"><input type="checkbox" data-fee="${esc(a.code)}" ${fee.has(a.code) ? "checked" : ""}>${esc(a.code)} ${esc(a.name)}</label>`).join("") || "No invoice lines in this period.";
+      const owner = new Set(saved.sync.ownerAccounts || []);
+      $("xeroOwner").innerHTML = expenseLines(x).map((n) =>
+        `<label class="chk"><input type="checkbox" data-owner="${esc(n)}" ${owner.has(n) ? "checked" : ""}>${esc(n)}</label>`).join("") || "No expenses last year.";
+    }
+    $("xeroMonths").value = String(saved.sync.months || 3);
+    const h = saved.sync.hidden;
+    $("xeroHidden").innerHTML = h.length
+      ? h.map((c) => esc(c.name)).join(", ") + ` <button type="button" class="link-btn" id="xeroUnhide">Show them again</button>`
+      : "None. Removing a Xero client from the table hides it from future refreshes.";
+  }
+
+  function renderYtd() {
+    const x = saved.xero;
+    if (!x) return;
+    const p = x.ytd.current_pnl;
+    const income = num(p.total_income), cos = num(p.total_cost_of_sales);
+    const owner = ownerPay(x.ytd);
+    const overheads = num(p.total_expenses) - owner;
+    const profit = num(p.net_profit) + owner;
+    const start = new Date(x.fyStart + "T00:00:00");
+    const days = Math.max(1, (new Date(x.refreshedAt) - start) / 86400000);
+    const yearPassed = Math.min(1, days / 365);
+    const proj = (v) => v / yearPassed;
+
+    const s = window.PPC.getState();
+    const gp = num(s.pt.gpPct) / 100;
+    const k = s.pt.basis === "month" ? 12 : 1;
+    const needed = gp > 0 ? (num(s.pt.netProfit) * k + num(s.pt.overheads) * k) / gp : 0;
+    const reached = needed > 0 ? income / needed : 0;
+    const status = !needed ? "none" : reached >= yearPassed ? "green" : reached >= yearPassed * 0.85 ? "amber" : "red";
+    const label = { green: "On pace", amber: "A little behind", red: "Behind", none: "Set a target" }[status];
+
+    $("ytdBody").innerHTML = `
+      ${needed ? `<div class="ytd-pace">
+        <div class="bar"><span class="now" style="width:${Math.min(100, reached * 100)}%;"></span><i class="marker" style="left:${yearPassed * 100}%"></i></div>
+        <div class="bar-legend"><span><i style="background:var(--blue)"></i>Revenue so far: ${Math.round(reached * 100)}% of the ${money(needed)} your target needs</span><span><i style="background:var(--navy);width:2px;"></i>${Math.round(yearPassed * 100)}% of the year has passed</span><span class="status ${status}">${label}</span></div>
+      </div>` : ""}
+      <div class="summary-grid">
+        <div class="stat"><div class="label">Revenue so far</div><div class="value">${money(income)}</div><div class="sub">On this pace: ${money(proj(income))} for the year</div></div>
+        <div class="stat navy"><div class="label">Gross profit %</div><div class="value">${income > 0 ? Math.round((income - cos) / income * 100) + "%" : "—"}</div><div class="sub">Target: ${s.pt.gpPct ? s.pt.gpPct + "%" : "not set"}</div></div>
+        <div class="stat"><div class="label">Overheads so far</div><div class="value">${money(overheads)}</div><div class="sub">On this pace: ${money(proj(overheads))} for the year</div></div>
+        <div class="stat highlight"><div class="label">Profit before your pay</div><div class="value">${money(profit)}</div><div class="sub">On this pace: ${money(proj(profit))} for the year, against a target of ${money(num(s.pt.netProfit) * k)}</div></div>
+      </div>
+      <p class="fine-print">Financial year from ${new Date(x.fyStart + "T00:00:00").toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" })}. "On this pace" scales the year so far to a full year, so seasonal months can make it swing.</p>`;
+  }
+
+  // ---------- Events ----------
+  $("xeroRefresh").addEventListener("click", refresh);
+  $("xeroMonths").addEventListener("change", (e) => {
+    saved.sync.months = +e.target.value;
+    persist();
+    say("Refresh from Xero to use the new period.");
+  });
+  card.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.dataset.fee !== undefined) {
+      const set = new Set(saved.sync.feeCodes || []);
+      t.checked ? set.add(t.dataset.fee) : set.delete(t.dataset.fee);
+      saved.sync.feeCodes = [...set];
+      applyXero(); persist();
+    }
+    if (t.dataset.owner !== undefined) {
+      const set = new Set(saved.sync.ownerAccounts || []);
+      t.checked ? set.add(t.dataset.owner) : set.delete(t.dataset.owner);
+      saved.sync.ownerAccounts = [...set];
+      applyXero(); renderYtd(); persist();
+    }
+  });
+  card.addEventListener("click", (e) => {
+    if (e.target.id === "xeroUnhide") {
+      saved.sync.hidden = [];
+      applyXero(); renderSettings(); persist();
+    }
+  });
+
+  // ---------- Start ----------
+  (async () => {
+    if (!window.claude || typeof window.claude.use !== "function") { renderHeader(); return; }
+    const [m, db, user] = await Promise.all([window.claude.use("mcp"), window.claude.use("db"), window.claude.use("user")]);
+    mcp = m;
+    if (db && user) {
+      try {
+        const uid = await user.id();
+        if (uid) {
+          store = db.doc("data/users/" + uid + "/calculator");
+          const snap = await store.get();
+          if (snap.exists) {
+            const d = snap.data();
+            saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, hidden: [] }, d.sync || {}), xero: d.xero || null };
+            if (d.state) window.PPC.setState(JSON.parse(JSON.stringify(d.state)));
+          }
+        }
+      } catch (e) {
+        store = null;
+      }
+    }
+    if (!store) say("Your settings are kept in this browser only.", false);
+    $("xeroRefresh").disabled = !mcp;
+    renderHeader();
+    renderSettings();
+    renderYtd();
+  })();
+})();

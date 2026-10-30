@@ -204,6 +204,23 @@ const CAPACITY_GUIDE = {
   .file-msg { margin: -10px 0 18px; font-size: .85rem; color: var(--navy); }
   .file-msg.error { color: var(--red); }
 
+  .import-steps { margin: 0 0 16px; padding-left: 20px; display: grid; gap: 14px; }
+  .import-steps li { padding-left: 4px; }
+  .import-steps .where { display: block; font-size: .8rem; color: var(--muted); }
+  .import-steps input[type=file] { margin-top: 6px; font-size: .85rem; max-width: 100%; }
+  .import-status { display: block; font-size: .8rem; margin-top: 4px; }
+  .import-status.ok { color: var(--green); }
+  .import-status.err { color: var(--red); }
+  .import-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin: 8px 0 16px; }
+  .import-grid > div { min-width: 0; }
+  .import-grid h3 { font-size: 1rem; margin-bottom: 8px; }
+  .scroll-box { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .scroll-box table td, .scroll-box table th { padding: 6px 8px; font-size: .85rem; }
+  .scroll-box label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .kv { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .kv td { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+  .kv td.amt { text-align: right; font-weight: 600; color: var(--navy); }
+
   .fine-print { font-size: .72rem; color: var(--muted); margin-top: 14px; }
   .print-only { display: none; }
 
@@ -246,6 +263,7 @@ const CAPACITY_GUIDE = {
       <p class="print-only" id="printDate"></p>
     </div>
     <div class="toolbar no-print">
+      <button class="btn btn-teal" id="importBtn" type="button">Import from Xero</button>
       <button class="btn btn-outline" id="openBtn" type="button">Open file</button>
       <input type="file" id="openFile" accept=".json,application/json" hidden>
       <button class="btn btn-outline" id="saveBtn" type="button">Save to file</button>
@@ -255,6 +273,33 @@ const CAPACITY_GUIDE = {
     </div>
   </header>
   <p class="file-msg no-print" id="fileMsg" role="status" hidden></p>
+
+  <!-- ===================== IMPORT FROM XERO REPORTS ===================== -->
+  <section class="card no-print" id="importCard" hidden>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+      <h2>Import from Xero reports</h2>
+      <button class="btn-remove" id="importClose" type="button" aria-label="Close import">&times;</button>
+    </div>
+    <p class="muted" style="margin-top:-6px;">Run these two reports in Xero for the same period (the last 12 months works best) and export each one to Excel. The files are read here in your browser and aren't uploaded anywhere.</p>
+    <ol class="import-steps">
+      <li><strong>Profit and Loss</strong>
+        <span class="where">In Xero: Accounting → Reports → Profit and Loss. Fills your overheads and gross profit % on the Profit target tab.</span>
+        <input type="file" id="plFile" accept=".xlsx,.xls,.csv">
+        <span class="import-status" id="plStatus"></span></li>
+      <li><strong>Income by Contact</strong>
+        <span class="where">In Xero: Accounting → Reports → Income by Contact. Fills your client list with each client's average monthly fee.</span>
+        <input type="file" id="ibcFile" accept=".xlsx,.xls,.csv">
+        <span class="import-status" id="ibcStatus"></span></li>
+    </ol>
+    <label class="field" style="max-width:260px;">Months the reports cover
+      <input type="number" id="importMonths" min="1" max="36" step="1" value="12">
+    </label>
+    <div id="importPreview"></div>
+    <div class="toolbar" style="margin-top:16px;">
+      <button class="btn btn-teal" id="importApply" type="button" disabled>Use these figures</button>
+      <button class="btn btn-outline" id="importCancel" type="button">Cancel</button>
+    </div>
+  </section>
 
   <!-- Settings -->
   <section class="card">
@@ -469,6 +514,17 @@ const CAPACITY_GUIDE = {
 
   function save() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
+    if (window.PPC && typeof window.PPC.onChange === "function") window.PPC.onChange(JSON.parse(JSON.stringify(state)));
+  }
+
+  // Replace the whole state with loaded data (a saved file, an import, or an add-on)
+  function loadData(d) {
+    state = Object.assign({ targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] }, d);
+    state.pt = Object.assign(emptyPt(), d.pt || {});
+    if (!Array.isArray(state.clients)) state.clients = [];
+    if (!LOCALES[state.currency]) state.currency = "NZD";
+    save();
+    renderAll();
   }
 
   function load() {
@@ -867,7 +923,8 @@ const CAPACITY_GUIDE = {
   els.rows.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-remove]");
     if (!btn) return;
-    state.clients.splice(+btn.dataset.remove, 1);
+    const removed = state.clients.splice(+btn.dataset.remove, 1)[0];
+    if (window.PPC && typeof window.PPC.onRemoveClient === "function") window.PPC.onRemoveClient(removed);
     save();
     renderRows();
     renderSummary();
@@ -931,11 +988,7 @@ const CAPACITY_GUIDE = {
         const parsed = JSON.parse(reader.result);
         const d = parsed && parsed.data ? parsed.data : parsed;
         if (!d || !Array.isArray(d.clients)) throw new Error("No client list");
-        state = Object.assign({ targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] }, d);
-        state.pt = Object.assign(emptyPt(), d.pt || {});
-        if (!LOCALES[state.currency]) state.currency = "NZD";
-        save();
-        renderAll();
+        loadData(d);
         showFileMsg("Opened " + file.name + ".");
       } catch (err) {
         showFileMsg("That file couldn't be opened. Choose a .json file saved from this calculator.", true);
@@ -943,6 +996,253 @@ const CAPACITY_GUIDE = {
       e.target.value = "";
     };
     reader.readAsText(file);
+  });
+
+  // ---------- Import from Xero reports ----------
+  const XLSX_URL = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+  const OWNER_PAY = /shareholder'?s? salar|owner'?s? (salary|wages|pay)|director'?s? (fees|salary)|drawings|proprietor|partner'?s? (salary|wages)/i;
+  let xlsxPromise = null;
+  const imp = { pnl: null, ibc: null, owner: new Set(), include: new Set() };
+
+  function loadXlsx() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (!xlsxPromise) {
+      xlsxPromise = new Promise((resolve, reject) => {
+        const el = document.createElement("script");
+        el.src = XLSX_URL;
+        el.onload = () => (window.XLSX ? resolve(window.XLSX) : reject(new Error("Spreadsheet reader missing")));
+        el.onerror = () => { xlsxPromise = null; reject(new Error("Spreadsheet reader didn't load")); };
+        document.head.appendChild(el);
+      });
+    }
+    return xlsxPromise;
+  }
+
+  async function readRows(file) {
+    const XLSX = await loadXlsx();
+    const wb = /\.csv$/i.test(file.name)
+      ? XLSX.read(await file.text(), { type: "string" })
+      : XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: false, defval: "" });
+  }
+
+  // "1,234.50", "(120.00)", "-$80" -> number; anything else -> null
+  function cellNum(v) {
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    let t = v.trim();
+    let neg = false;
+    if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
+    t = t.replace(/[$,\s]|NZD|AUD|USD|CAD/gi, "");
+    if (t.startsWith("-")) { neg = !neg; t = t.slice(1); }
+    if (!/^\d+(\.\d+)?$/.test(t)) return null;
+    return neg ? -parseFloat(t) : parseFloat(t);
+  }
+
+  // A report row as its first text cell (label) and the numbers after it
+  function rowParts(row) {
+    let label = "";
+    const values = [];
+    row.forEach((c) => {
+      const n = cellNum(c);
+      if (n !== null) { if (label) values.push(n); }
+      else if (typeof c === "string" && c.trim() && !label) label = c.trim();
+    });
+    return { label, values };
+  }
+
+  function reportHeader(rows) {
+    const lines = rows.slice(0, 6)
+      .map((row) => row.filter((c) => typeof c === "string" && c.trim() && cellNum(c) === null).join(" ").trim())
+      .filter(Boolean);
+    return { org: lines[1] || "", period: lines.find((t) => /for the|ended|\bto\b/i.test(t)) || "" };
+  }
+
+  function monthsFromPeriod(text) {
+    if (!text) return null;
+    if (/year ended/i.test(text)) return 12;
+    const m = text.match(/(\d+)\s+months?\s+ended/i);
+    if (m) return +m[1];
+    const dates = text.match(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g);
+    if (dates && dates.length >= 2) {
+      const a = Date.parse(dates[0]), b = Date.parse(dates[1]);
+      if (a && b && b > a) return Math.max(1, Math.round((b - a) / (1000 * 60 * 60 * 24 * 30.44)));
+    }
+    return null;
+  }
+
+  function parsePnl(rows) {
+    const r = Object.assign(reportHeader(rows), { income: null, otherIncome: 0, cos: 0, gp: null, opex: null, net: null, expenses: [] });
+    let section = "";
+    rows.forEach((row) => {
+      const { label, values } = rowParts(row);
+      if (!label) return;
+      const l = label.toLowerCase();
+      if (!values.length) {
+        if (/cost of sales|direct cost|cost of goods/.test(l)) section = "cos";
+        else if (/other income/.test(l)) section = "other";
+        else if (/expense|overhead/.test(l)) section = "opex";
+        else if (/income|revenue|sales/.test(l)) section = "income";
+        return;
+      }
+      const v = values[0];
+      if (/^total (trading |operating )?(income|revenue|sales)$/.test(l)) { if (r.income === null) r.income = v; section = ""; }
+      else if (/^total other income/.test(l)) { r.otherIncome = v; section = ""; }
+      else if (/^total (cost of sales|direct costs?|cost of goods sold)/.test(l)) { r.cos = v; section = ""; }
+      else if (/^gross profit/.test(l)) r.gp = v;
+      else if (/^total (operating )?expenses|^total overheads/.test(l)) { r.opex = v; section = ""; }
+      else if (/^net (profit|income|loss)/.test(l)) r.net = v;
+      else if (section === "opex") r.expenses.push({ name: label, amount: v });
+    });
+    if (r.income === null && r.gp !== null) r.income = r.gp + r.cos;
+    if (r.opex === null) r.opex = r.expenses.reduce((t, e) => t + e.amount, 0);
+    if (r.net === null && r.income !== null) r.net = r.income + r.otherIncome - r.cos - r.opex;
+    return r.income > 0 ? r : null;
+  }
+
+  function parseIbc(rows) {
+    const r = Object.assign(reportHeader(rows), { contacts: [] });
+    const byName = new Map();
+    rows.forEach((row, i) => {
+      if (i === 0) return;
+      const { label, values } = rowParts(row);
+      if (!label || !values.length || /^(total|grand total|contact|account|name)\b/i.test(label)) return;
+      byName.set(label, (byName.get(label) || 0) + values[values.length - 1]);
+    });
+    byName.forEach((amount, name) => { if (amount > 0) r.contacts.push({ name, amount }); });
+    r.contacts.sort((a, b) => b.amount - a.amount);
+    return r.contacts.length ? r : null;
+  }
+
+  function setImportStatus(id, text, ok) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = "import-status " + (ok ? "ok" : "err");
+  }
+
+  async function handleReport(input, kind) {
+    const file = input.files[0];
+    const statusId = kind === "pnl" ? "plStatus" : "ibcStatus";
+    if (!file) return;
+    setImportStatus(statusId, "Reading " + file.name + "…", true);
+    try {
+      const rows = await readRows(file);
+      if (kind === "pnl") {
+        imp.pnl = parsePnl(rows);
+        if (!imp.pnl) throw new Error("This doesn't look like a Profit and Loss report. Check you exported the Profit and Loss to Excel.");
+        imp.owner = new Set(imp.pnl.expenses.map((e, i) => (OWNER_PAY.test(e.name) ? i : -1)).filter((i) => i >= 0));
+        setImportStatus(statusId, "Read " + file.name + (imp.pnl.period ? " (" + imp.pnl.period + ")" : ""), true);
+      } else {
+        imp.ibc = parseIbc(rows);
+        if (!imp.ibc) throw new Error("No clients with income found. Check you exported the Income by Contact report to Excel.");
+        imp.include = new Set(imp.ibc.contacts.map((c, i) => i));
+        setImportStatus(statusId, "Read " + file.name + ": " + imp.ibc.contacts.length + " contacts", true);
+      }
+      const months = monthsFromPeriod((kind === "pnl" ? imp.pnl : imp.ibc).period);
+      if (months) $("importMonths").value = months;
+    } catch (err) {
+      if (kind === "pnl") imp.pnl = null; else imp.ibc = null;
+      setImportStatus(statusId, /reader/i.test(err.message)
+        ? "The spreadsheet reader couldn't load. Check your internet connection and try again."
+        : err.message, false);
+    }
+    renderImportPreview();
+  }
+
+  function ownerPayTotal() {
+    return imp.pnl ? imp.pnl.expenses.reduce((t, e, i) => t + (imp.owner.has(i) ? e.amount : 0), 0) : 0;
+  }
+
+  function renderImportPreview() {
+    const months = Math.max(1, num($("importMonths").value) || 12);
+    const k = 12 / months;
+    const yr = months === 12 ? "" : " (a year at this rate)";
+    let html = '<div class="import-grid">';
+    if (imp.pnl) {
+      const p = imp.pnl, owner = ownerPayTotal();
+      const gpPct = (p.income - p.cos) / p.income;
+      const exp = p.expenses.map((e, i) => `<tr><td><label><input type="checkbox" data-owner="${i}" ${imp.owner.has(i) ? "checked" : ""}>${escapeHtml(e.name)}</label></td><td class="num">${money(e.amount)}</td></tr>`).join("");
+      html += `<div><h3>Profit and Loss</h3>
+        <table class="kv">
+          <tr><td>Income</td><td class="amt">${money(p.income)}</td></tr>
+          <tr><td>Cost of sales</td><td class="amt">${money(p.cos)}</td></tr>
+          <tr><td>Gross profit %</td><td class="amt">${pct(gpPct)}</td></tr>
+          <tr><td>Operating expenses</td><td class="amt">${money(p.opex)}</td></tr>
+          <tr><td>Less your own pay (ticked below)</td><td class="amt">${money(owner)}</td></tr>
+          <tr><td><strong>Overheads${yr}</strong></td><td class="amt">${money((p.opex - owner) * k)}</td></tr>
+          <tr><td><strong>Profit before your pay${yr}</strong></td><td class="amt">${money((p.net + owner) * k)}</td></tr>
+        </table>
+        <p class="table-note">Tick any expense lines that are your own pay, such as a shareholder salary. They're left out of overheads, because your pay is what the Profit target works towards.</p>
+        ${exp ? `<div class="scroll-box"><table>${exp}</table></div>` : ""}
+      </div>`;
+    }
+    if (imp.ibc) {
+      const rows = imp.ibc.contacts.map((c, i) => `<tr><td><label><input type="checkbox" data-include="${i}" ${imp.include.has(i) ? "checked" : ""}>${escapeHtml(c.name)}</label></td><td class="num">${money(c.amount)}</td><td class="num">${money(c.amount / months)}</td></tr>`).join("");
+      html += `<div><h3>Clients (${imp.include.size} of ${imp.ibc.contacts.length} ticked)</h3>
+        <p class="table-note" style="margin:0 0 8px;">Untick anyone who isn't an ongoing client, such as one-off jobs or course sales. Hours aren't in Xero, so you'll add those on the Client pricing tab.</p>
+        <div class="scroll-box"><table><thead><tr><th>Contact</th><th class="num">Total</th><th class="num">Per month</th></tr></thead><tbody>${rows}</tbody></table></div>
+      </div>`;
+    }
+    html += "</div>";
+    $("importPreview").innerHTML = imp.pnl || imp.ibc ? html : "";
+    $("importApply").disabled = !(imp.pnl || imp.ibc);
+  }
+
+  function applyImport() {
+    const months = Math.max(1, num($("importMonths").value) || 12);
+    const k = 12 / months;
+    const next = JSON.parse(JSON.stringify(state));
+    const parts = [];
+    if (imp.pnl) {
+      const p = imp.pnl, owner = ownerPayTotal();
+      next.pt.basis = "year";
+      next.pt.overheads = String(Math.round((p.opex - owner) * k));
+      next.pt.gpPct = String(Math.round((p.income - p.cos) / p.income * 100));
+      const profit = (p.net + owner) * k;
+      if (!(num(next.pt.netProfit) > 0) && profit > 0) next.pt.netProfit = String(Math.round(profit));
+      parts.push("Profit and Loss");
+    }
+    if (imp.ibc) {
+      const prev = new Map(state.clients.map((c) => [String(c.name || "").trim().toLowerCase(), c]));
+      next.clients = imp.ibc.contacts.filter((c, i) => imp.include.has(i)).map((c) => {
+        const old = prev.get(c.name.toLowerCase()) || {};
+        return { name: c.name, fee: Math.round(c.amount / months), hours: old.hours ?? "", teamHours: old.teamHours ?? "", otherCosts: old.otherCosts ?? "" };
+      });
+      parts.push("Income by Contact");
+    }
+    const org = (imp.pnl && imp.pnl.org) || (imp.ibc && imp.ibc.org) || "";
+    const when = new Date().toLocaleDateString(LOCALES[state.currency] || "en-NZ", { day: "numeric", month: "long", year: "numeric" });
+    next.dataNote = `Imported from Xero (${parts.join(" and ")})${org ? " for " + org : ""} on ${when}, covering ${months} month${months === 1 ? "" : "s"}. Amounts exclude GST.`;
+    loadData(next);
+    closeImport();
+    showFileMsg("Imported your Xero figures. Check the Profit target, then add hours for each client on the Client pricing tab.");
+  }
+
+  function openImport() {
+    $("importCard").hidden = false;
+    $("importCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function closeImport() {
+    $("importCard").hidden = true;
+    imp.pnl = imp.ibc = null;
+    ["plFile", "ibcFile"].forEach((id) => { $(id).value = ""; });
+    ["plStatus", "ibcStatus"].forEach((id) => { $(id).textContent = ""; });
+    renderImportPreview();
+  }
+
+  $("importBtn").addEventListener("click", openImport);
+  $("importClose").addEventListener("click", closeImport);
+  $("importCancel").addEventListener("click", closeImport);
+  $("importApply").addEventListener("click", applyImport);
+  $("plFile").addEventListener("change", (e) => handleReport(e.target, "pnl"));
+  $("ibcFile").addEventListener("change", (e) => handleReport(e.target, "ibc"));
+  $("importMonths").addEventListener("input", renderImportPreview);
+  $("importPreview").addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.dataset.owner !== undefined) { t.checked ? imp.owner.add(+t.dataset.owner) : imp.owner.delete(+t.dataset.owner); }
+    if (t.dataset.include !== undefined) { t.checked ? imp.include.add(+t.dataset.include) : imp.include.delete(+t.dataset.include); }
+    renderImportPreview();
   });
 
   $("printBtn").addEventListener("click", () => window.print());
@@ -957,6 +1257,16 @@ const CAPACITY_GUIDE = {
     state.pt = Object.assign(emptyPt(), saved.pt || {});
     delete state.desiredIncome;
   }
+  // Hooks for edition add-ons (e.g. a live Xero connection)
+  window.PPC = {
+    getState: () => JSON.parse(JSON.stringify(state)),
+    setState: (d) => loadData(d),
+    money: (v, d) => money(v, d),
+    showMessage: (text, isError) => showFileMsg(text, isError),
+    onChange: null,
+    onRemoveClient: null
+  };
+
   showTab(location.hash.slice(1));
   renderAll();
 })();
