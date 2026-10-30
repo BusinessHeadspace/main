@@ -128,14 +128,17 @@ const CAPACITY_GUIDE = {
   #clientTable tr.group td.num { font-variant-numeric: tabular-nums; }
   .row-note { font-size: .75rem; color: var(--muted); margin-top: 3px; max-width: 280px; line-height: 1.35; }
   .row-note.warn { color: var(--amber); font-weight: 600; }
-  .note-d { margin-top: 3px; }
-  .note-d summary { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; list-style: none;
-    font-size: .72rem; font-weight: 600; color: var(--muted); padding: 1px 7px; border-radius: 999px; background: #F0EEE8; }
+  .name-cell { display: flex; align-items: center; gap: 6px; }
+  .note-spacer { flex: none; width: 20px; }
+  .note-d { position: relative; flex: none; }
+  .note-d summary { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; list-style: none;
+    font-size: .72rem; font-weight: 700; font-style: italic; font-family: Georgia, serif; color: var(--muted); background: #F0EEE8; }
   .note-d summary::-webkit-details-marker { display: none; }
-  .note-d summary::after { content: "▾"; font-size: .7rem; }
-  .note-d[open] summary::after { content: "▴"; }
-  .note-d.warn summary { color: var(--amber); background: var(--amber-bg); }
+  .note-d.warn summary { color: var(--white); background: var(--amber); font-style: normal; font-family: inherit; }
+  .note-d[open] summary { box-shadow: 0 0 0 2px var(--teal); }
   .note-d summary:focus-visible { outline: 3px solid rgba(56,185,198,.5); outline-offset: 1px; }
+  .note-d .row-note { position: absolute; z-index: 5; top: calc(100% + 6px); left: -8px; width: 260px; max-width: none; margin: 0;
+    background: var(--white); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 18px rgba(7,58,89,.15); font-size: .8rem; }
   .reset-fee { display: block; margin-top: 3px; font-size: .72rem; white-space: nowrap; }
   .mini-stats { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 16px; font-size: .88rem; color: var(--muted); }
   .mini-stats strong { color: var(--navy); }
@@ -765,7 +768,7 @@ const CAPACITY_GUIDE = {
       SERVICES.map((x) => `<option value="${x.id}" ${serviceOf(c) === x.id ? "selected" : ""}>${x.label}</option>`).join("");
     return `
       <tr data-i="${i}">
-        <td><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${c.note ? `<details class="note-d${c.noteWarn ? " warn" : ""}" data-note="${i}" ${openNotes.has(noteKey(c)) ? "open" : ""}><summary>${c.noteWarn ? "Check" : "Note"}</summary><div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}</div></details>` : ""}</td>
+        <td><div class="name-cell"><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${c.note ? `<details class="note-d${c.noteWarn ? " warn" : ""}" data-note="${i}" ${openNotes.has(noteKey(c)) ? "open" : ""}><summary title="${escapeHtml(c.note)}" aria-label="${c.noteWarn ? "Check" : "Note"}: ${escapeHtml(c.note)}">${c.noteWarn ? "!" : "i"}</summary><div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}</div></details>` : `<span class="note-spacer"></span>`}</div></td>
         <td><select data-field="type" aria-label="Service">${opts}</select></td>
         <td class="num">${numInput("fee", c.fee, "Monthly fee")}<span data-out="reset"></span></td>
         <td class="num">${numInput("hours", c.hours, "Total hours per month")}</td>
