@@ -34,9 +34,9 @@
     .xero-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
     .xero-bar .who { font-weight: 600; color: var(--navy); }
     .xero-bar .when { font-size: .85rem; color: var(--muted); }
-    .xero-msg { margin: 10px 0 0; font-size: .9rem; }
+    .xero-msg { margin: 6px 0 0; font-size: .85rem; }
     .xero-msg.err { color: var(--red); }
-    .xero-settings { margin-top: 14px; }
+    .xero-settings { margin-top: 8px; }
     .xero-settings summary { cursor: pointer; font-weight: 600; color: var(--blue); font-size: .9rem; }
     .xero-settings .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 12px; }
     .xero-settings .cols > div { min-width: 0; }
