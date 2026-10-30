@@ -25,6 +25,13 @@ const MARKET_BENCHMARKS = {
     CAD: 70   // PLACEHOLDER
   }
 };
+
+/* Billable hours per person per week, used for the Profit target reality check.
+   Up to "comfortable" shows green, up to "stretch" shows amber, above that red. */
+const CAPACITY_GUIDE = {
+  comfortable: 30,  // PLACEHOLDER
+  stretch: 35       // PLACEHOLDER
+};
 </script>
 <!-- ===================== END MARKET-RATE BENCHMARKS ===================== -->
 
@@ -150,6 +157,49 @@ const MARKET_BENCHMARKS = {
   .notice strong { display: block; margin-bottom: 4px; }
   .success { background: var(--green-bg); border-left-color: var(--green); }
 
+  .tabs { display: flex; gap: 6px; margin-bottom: 22px; border-bottom: 2px solid var(--line); }
+  .tab {
+    background: none; border: none; border-bottom: 3px solid transparent; margin-bottom: -2px;
+    padding: 10px 16px; font-weight: 600; color: var(--muted); cursor: pointer;
+  }
+  .tab:hover { color: var(--navy); }
+  .tab[aria-selected="true"] { color: var(--navy); border-bottom-color: var(--gold); }
+  .tab:focus-visible, .btn:focus-visible, .seg label:focus-within { outline: 3px solid rgba(56,185,198,.5); outline-offset: 2px; }
+  .tab .step { display: inline-block; font-size: .75rem; color: var(--blue); margin-right: 6px; }
+
+  .pt-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 22px; align-items: start; }
+  @media (max-width: 860px) { .pt-grid { grid-template-columns: minmax(0, 1fr); } }
+  .pt-inputs { display: grid; gap: 16px; }
+  .seg { display: inline-flex; align-self: flex-start; border: 1.5px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg label { padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: .85rem; color: var(--muted); }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label:has(input:checked) { background: var(--navy); color: var(--white); }
+  .link-btn { background: none; border: none; padding: 0; color: var(--blue); font-weight: 600; font-size: .8rem; cursor: pointer; text-decoration: underline; text-align: left; }
+  .readout { padding: 9px 11px; border-radius: 8px; background: var(--cream); color: var(--navy); font-weight: 600; }
+
+  .steps { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .steps td { padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  .steps td.op { width: 28px; color: var(--blue); font-weight: 700; text-align: center; }
+  .steps td.amt { text-align: right; font-weight: 600; color: var(--navy); min-width: 6.5em; }
+  #ptSteps { overflow-x: auto; }
+  .steps tr.total td { border-bottom: 2px solid var(--navy); font-weight: 700; color: var(--navy); }
+  .steps tr.total td.amt { font-size: 1.15rem; }
+  .steps tr.aside td { color: var(--muted); font-size: .85rem; }
+  .steps tr.aside td.amt { color: var(--muted); font-weight: 500; }
+  .steps .per { display: block; font-size: .78rem; font-weight: 500; color: var(--muted); }
+
+  .capacity { margin-top: 18px; padding: 16px; border-radius: 10px; background: var(--cream); display: grid; gap: 8px; }
+  .capacity .big { font-size: 1.6rem; font-weight: 700; color: var(--navy); }
+  .capacity p { margin: 0; }
+
+  .bar { height: 12px; background: #EDE8DB; border-radius: 999px; overflow: hidden; position: relative; }
+  .bar span { display: block; height: 100%; }
+  .bar .now { background: var(--blue); }
+  .bar .reprice { background: var(--gold); }
+  .bar-wrap { display: grid; gap: 6px; margin: 6px 0 16px; }
+  .bar-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .8rem; color: var(--muted); }
+  .bar-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
   .fine-print { font-size: .72rem; color: var(--muted); margin-top: 14px; }
   .print-only { display: none; }
 
@@ -174,6 +224,8 @@ const MARKET_BENCHMARKS = {
     input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     input[type=number] { -moz-appearance: textfield; }
     .col-remove { display: none; }
+    [data-panel], [data-panel][hidden] { display: block !important; }
+    .tabs { display: none; }
     .status, .stat, .notice { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     header.app { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
@@ -185,17 +237,19 @@ const MARKET_BENCHMARKS = {
   <header class="app">
     <div>
       <h1>Pricing &amp; Profit Calculator</h1>
-      <p>See which clients are paying what you're worth, and what repricing could earn you.</p>
+      <p>Work out the revenue you need, then check which clients are getting you there.</p>
       <p class="print-only" id="printDate"></p>
     </div>
     <div class="toolbar no-print">
+      <button class="btn btn-outline" id="sampleBtn" type="button">Load sample data</button>
+      <button class="btn btn-outline" id="clearBtn" type="button">Clear all</button>
       <button class="btn btn-gold" id="printBtn" type="button">Print / Save as PDF</button>
     </div>
   </header>
 
   <!-- Settings -->
   <section class="card">
-    <h2>Your targets</h2>
+    <h2>Your settings</h2>
     <div class="settings">
       <label class="field">Target hourly rate
         <input type="number" id="targetRate" min="0" step="1" placeholder="e.g. 95">
@@ -211,11 +265,67 @@ const MARKET_BENCHMARKS = {
       <label class="field"><span>Team cost per hour <span class="hint">(wages + on-costs)</span></span>
         <input type="number" id="teamCostRate" min="0" step="1" placeholder="e.g. 42">
       </label>
-      <label class="field"><span>Desired annual income <span class="hint">(optional)</span></span>
-        <input type="number" id="desiredIncome" min="0" step="1000" placeholder="e.g. 120000">
-      </label>
     </div>
   </section>
+
+  <nav class="tabs no-print" role="tablist" aria-label="Calculator sections">
+    <button class="tab" role="tab" type="button" id="tab-profit-target" data-tab="profit-target" aria-controls="panel-profit-target"><span class="step">1</span>Profit target</button>
+    <button class="tab" role="tab" type="button" id="tab-client-pricing" data-tab="client-pricing" aria-controls="panel-client-pricing"><span class="step">2</span>Client pricing</button>
+  </nav>
+
+  <!-- ===================== PROFIT TARGET ===================== -->
+  <div data-panel="profit-target" id="panel-profit-target" role="tabpanel" aria-labelledby="tab-profit-target">
+    <section class="card">
+      <h2>Profit target</h2>
+      <p class="muted" style="margin-top:-6px;">Start with the profit you want and work backwards to the revenue and billable hours it takes. You need two numbers from your Budget: your overheads and your gross profit %.</p>
+      <div class="pt-grid">
+        <div class="pt-inputs">
+          <div class="field" style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:.85rem;color:var(--navy);">
+            I'm entering figures
+            <div class="seg" role="radiogroup" aria-label="Entering figures per year or per month">
+              <label><input type="radio" name="ptBasis" id="ptBasisYear" value="year">Per year</label>
+              <label><input type="radio" name="ptBasis" id="ptBasisMonth" value="month">Per month</label>
+            </div>
+          </div>
+          <label class="field"><span>Net profit you want <span class="hint">(before tax)</span></span>
+            <input type="number" id="ptNetProfit" min="0" step="1000" placeholder="e.g. 60000">
+          </label>
+          <label class="field"><span>Tax rate on profit % <span class="hint">(optional, to see take-home pay)</span></span>
+            <input type="number" id="ptTaxRate" min="0" max="100" step="1" placeholder="e.g. 28">
+          </label>
+          <label class="field"><span>Overheads <span class="hint">(expenses from your Budget, not cost of sales)</span></span>
+            <input type="number" id="ptOverheads" min="0" step="500" placeholder="e.g. 18000">
+          </label>
+          <label class="field"><span>Target gross profit % <span class="hint">(100% if it's just you)</span></span>
+            <input type="number" id="ptGpPct" min="1" max="100" step="1" placeholder="e.g. 60">
+            <button type="button" class="link-btn no-print" id="ptUseMargin" hidden></button>
+          </label>
+          <div class="field" style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:.85rem;color:var(--navy);">
+            Hourly rate <span class="hint" style="font-weight:400;color:var(--muted);">Your target hourly rate from Your settings above</span>
+            <div class="readout" id="ptRateReadout">—</div>
+          </div>
+          <label class="field"><span>People doing billable work <span class="hint">(including you)</span></span>
+            <input type="number" id="ptPeople" min="1" step="1" placeholder="e.g. 2">
+          </label>
+          <label class="field"><span>Working weeks per year <span class="hint">(52 matches the course spreadsheet; allow for leave and public holidays)</span></span>
+            <input type="number" id="ptWeeks" min="1" max="52" step="1" placeholder="52">
+          </label>
+        </div>
+        <div>
+          <div id="ptSteps"></div>
+          <div id="ptCapacity"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>How your clients compare</h2>
+      <div id="ptCompare"></div>
+    </section>
+  </div>
+
+  <!-- ===================== CLIENT PRICING ===================== -->
+  <div data-panel="client-pricing" id="panel-client-pricing" role="tabpanel" aria-labelledby="tab-client-pricing">
 
   <!-- Clients -->
   <section class="card" id="clientsCard">
@@ -223,8 +333,6 @@ const MARKET_BENCHMARKS = {
       <h2 style="margin:0;">Clients</h2>
       <div class="toolbar no-print">
         <button class="btn btn-teal" id="addClientBtn" type="button">+ Add client</button>
-        <button class="btn btn-outline" id="sampleBtn" type="button">Load sample data</button>
-        <button class="btn btn-outline" id="clearBtn" type="button">Clear all</button>
       </div>
     </div>
     <div class="table-scroll">
@@ -267,6 +375,7 @@ const MARKET_BENCHMARKS = {
     <div id="repricing"></div>
     <p class="fine-print" id="benchmarkDate"></p>
   </section>
+  </div>
 
 </div>
 
@@ -283,7 +392,7 @@ const MARKET_BENCHMARKS = {
     targetRate: 95,
     currency: "NZD",
     teamCostRate: 42,
-    desiredIncome: 60000,
+    pt: { basis: "year", netProfit: 60000, taxRate: 28, overheads: 18000, gpPct: 60, people: 2, weeks: 48 },
     clients: [
       { name: "Kowhai Plumbing Ltd",        fee: 650,  hours: 6,   teamHours: 4, otherCosts: 35 },
       { name: "Harbourside Café",           fee: 420,  hours: 5,   teamHours: 3, otherCosts: 25 },
@@ -298,14 +407,14 @@ const MARKET_BENCHMARKS = {
     ]
   };
 
-  let state = { targetRate: "", currency: "NZD", teamCostRate: "", desiredIncome: "", clients: [] };
+  const emptyPt = () => ({ basis: "year", netProfit: "", taxRate: "", overheads: "", gpPct: "", people: "", weeks: "" });
+  let state = { targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] };
 
   const $ = (id) => document.getElementById(id);
   const els = {
     targetRate: $("targetRate"),
     currency: $("currency"),
     teamCostRate: $("teamCostRate"),
-    desiredIncome: $("desiredIncome"),
     rows: $("clientRows"),
     summary: $("summaryGrid"),
     repricing: $("repricing"),
@@ -333,6 +442,10 @@ const MARKET_BENCHMARKS = {
 
   function pct(v) {
     return (v * 100).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "%";
+  }
+
+  function hrs(v, d) {
+    return v.toLocaleString(undefined, { maximumFractionDigits: d === undefined ? 0 : d });
   }
 
   function escapeHtml(s) {
@@ -378,6 +491,48 @@ const MARKET_BENCHMARKS = {
       if (rate < target) neededFee = target * hours;
     }
     return { fee, hours, rate, status, neededFee, cost, grossProfit, margin };
+  }
+
+  // Totals across the client list (monthly figures)
+  function clientTotals() {
+    const t = { revenue: 0, hours: 0, cost: 0, extra: 0, count: 0 };
+    state.clients.forEach((c) => {
+      const a = analyse(c);
+      t.revenue += a.fee;
+      t.hours += a.hours;
+      t.cost += a.cost;
+      if (a.neededFee !== null) t.extra += a.neededFee - a.fee;
+      if (a.fee > 0) t.count++;
+    });
+    return t;
+  }
+
+  // Profit target: work backwards from net profit (all results annual)
+  function profitTarget() {
+    const p = state.pt;
+    const k = p.basis === "month" ? 12 : 1;
+    const netProfit = num(p.netProfit) * k;
+    const overheads = num(p.overheads) * k;
+    const gpPct = num(p.gpPct) / 100;
+    const taxRate = num(p.taxRate) / 100;
+    const rate = num(state.targetRate);
+    const people = Math.max(1, num(p.people) || 1);
+    const weeks = num(p.weeks) > 0 ? Math.min(52, num(p.weeks)) : 52;
+    if (!(netProfit > 0) || !(gpPct > 0)) return null;
+    const grossProfit = netProfit + overheads;
+    const revenue = grossProfit / gpPct;
+    const hours = rate > 0 ? revenue / rate : null;
+    const perPersonWeek = hours === null ? null : hours / weeks / people;
+    let status = "none";
+    if (perPersonWeek !== null) {
+      status = perPersonWeek <= CAPACITY_GUIDE.comfortable ? "green"
+        : perPersonWeek <= CAPACITY_GUIDE.stretch ? "amber" : "red";
+    }
+    return {
+      netProfit, overheads, gpPct, taxRate, rate, people, weeks, grossProfit, revenue,
+      tax: netProfit * taxRate, takeHome: netProfit * (1 - taxRate),
+      cos: revenue - grossProfit, hours, perPersonWeek, status
+    };
   }
 
   const STATUS_LABEL = { green: "On target", amber: "Slightly under", red: "Well under", none: "—" };
@@ -433,7 +588,7 @@ const MARKET_BENCHMARKS = {
     const costAnnual = costMonthly * 12;
     const gpAnnual = annual - costAnnual;
     const margin = annual > 0 ? gpAnnual / annual : null;
-    const desired = num(state.desiredIncome);
+    const pt = profitTarget();
 
     let html = `
       <div class="stat"><div class="label">Monthly revenue</div><div class="value">${money(monthly)}</div></div>
@@ -444,14 +599,16 @@ const MARKET_BENCHMARKS = {
       <div class="stat teal"><div class="label">Average effective rate</div><div class="value">${avgRate === null ? "—" : money(avgRate, 2)}</div>${num(state.targetRate) > 0 ? `<div class="sub">Target: ${money(num(state.targetRate), 2)}</div>` : ""}</div>
       <div class="stat highlight"><div class="label">Extra from repricing</div><div class="value">${money(extraAnnual)}</div><div class="sub">per year (revenue and gross profit) if all under-target clients are repriced</div></div>`;
 
-    if (desired > 0) {
-      const gap = desired - gpAnnual;
-      const afterRepricing = desired - (gpAnnual + extraAnnual);
+    if (pt) {
+      const gap = pt.revenue - annual;
+      const afterRepricing = gap - extraAnnual;
       let sub;
-      if (gap <= 0) sub = `You're ${money(-gap)} ahead of your ${money(desired)} goal`;
+      if (gap <= 0) sub = `You're ahead of the ${money(pt.revenue)} revenue your profit target needs`;
       else if (afterRepricing <= 0) sub = `Repricing alone would close it`;
       else sub = `Still ${money(afterRepricing)} short after repricing`;
-      html += `<div class="stat highlight"><div class="label">${gap > 0 ? "Gap to desired income" : "Above desired income"}</div><div class="value">${money(Math.abs(gap))}</div><div class="sub">Measured against gross profit. ${sub}.</div></div>`;
+      html += `<div class="stat highlight"><div class="label">${gap > 0 ? "Revenue gap to profit target" : "Ahead of profit target"}</div><div class="value">${money(Math.abs(gap))}</div><div class="sub">${sub}.</div></div>`;
+    } else {
+      html += `<div class="stat highlight"><div class="label">Revenue gap to profit target</div><div class="value">—</div><div class="sub">Fill in the Profit target tab to see this.</div></div>`;
     }
     els.summary.innerHTML = html;
   }
@@ -512,25 +669,172 @@ const MARKET_BENCHMARKS = {
       </table></div>`;
   }
 
+  function renderProfitTarget() {
+    const rate = num(state.targetRate);
+    $("ptRateReadout").textContent = rate > 0 ? money(rate, 2) + " per hour" : "Set your target hourly rate above";
+
+    const t = clientTotals();
+    const useBtn = $("ptUseMargin");
+    if (t.revenue > 0) {
+      const m = Math.round((t.revenue - t.cost) / t.revenue * 100);
+      useBtn.hidden = false;
+      useBtn.textContent = `Use my clients' current margin (${m}%)`;
+      useBtn.dataset.margin = m;
+    } else {
+      useBtn.hidden = true;
+    }
+
+    const r = profitTarget();
+    if (!r) {
+      $("ptSteps").innerHTML = '<p class="muted">Enter the net profit you want and your target gross profit % to see the revenue and hours it takes.</p>';
+      $("ptCapacity").innerHTML = "";
+      $("ptCompare").innerHTML = '<p class="muted">Fill in your profit target first.</p>';
+      return;
+    }
+
+    const perMonth = (v) => `<span class="per">${money(v / 12)} / month</span>`;
+    let rows = `<tr><td class="op"></td><td>Net profit you want</td><td class="amt">${money(r.netProfit)}${perMonth(r.netProfit)}</td></tr>`;
+    if (r.taxRate > 0) {
+      rows += `<tr class="aside"><td class="op"></td><td>After ${pct(r.taxRate)} tax (${money(r.tax)}), your take-home pay is</td><td class="amt">${money(r.takeHome)}${perMonth(r.takeHome)}</td></tr>`;
+    }
+    rows += `<tr><td class="op">+</td><td>Overheads</td><td class="amt">${money(r.overheads)}</td></tr>
+      <tr class="total"><td class="op">=</td><td>Gross profit needed</td><td class="amt">${money(r.grossProfit)}</td></tr>
+      <tr><td class="op">÷</td><td>Target gross profit</td><td class="amt">${pct(r.gpPct)}</td></tr>
+      <tr class="total"><td class="op">=</td><td>Revenue needed</td><td class="amt">${money(r.revenue)}${perMonth(r.revenue)}</td></tr>
+      <tr class="aside"><td class="op"></td><td>Of which cost of sales (team and direct costs)</td><td class="amt">${money(r.cos)}</td></tr>`;
+    if (r.hours !== null) {
+      rows += `<tr><td class="op">÷</td><td>Hourly rate</td><td class="amt">${money(r.rate, 2)}</td></tr>
+        <tr class="total"><td class="op">=</td><td>Billable hours needed</td><td class="amt">${hrs(r.hours)} hrs / year<span class="per">${hrs(r.hours / 12)} / month · ${hrs(r.hours / r.weeks, 1)} / week over ${r.weeks} weeks</span></td></tr>`;
+    }
+    $("ptSteps").innerHTML = `<table class="steps">${rows}</table>`;
+
+    if (r.hours === null) {
+      $("ptCapacity").innerHTML = '<div class="capacity"><p class="muted">Set your target hourly rate above to see the hours this takes.</p></div>';
+    } else {
+      const msg = {
+        green: "Achievable. That leaves time for admin, marketing and running the business.",
+        amber: "A stretch. It's possible, but leaves little room for admin, leave or growth.",
+        red: "Not realistic at this rate. Lift your prices or lower the target before adding more hours."
+      }[r.status];
+      $("ptCapacity").innerHTML = `<div class="capacity">
+        <div class="label" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;">Billable hours per person per week${r.people > 1 ? ` (${r.people} people)` : ""}</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;"><span class="big">${hrs(r.perPersonWeek, 1)}</span><span class="status ${r.status}">${{ green: "Achievable", amber: "Stretch", red: "Not realistic" }[r.status]}</span></div>
+        <p>${msg}</p>
+        <p class="fine-print" style="margin:0;">Guide: up to ${CAPACITY_GUIDE.comfortable} billable hours a week is comfortable, up to ${CAPACITY_GUIDE.stretch} is a stretch.</p>
+      </div>`;
+    }
+
+    // Compare with the client list
+    if (t.revenue <= 0) {
+      $("ptCompare").innerHTML = '<p class="muted">Add your clients on the Client pricing tab to see how close they get you.</p>';
+      return;
+    }
+    const nowYr = t.revenue * 12, extraYr = t.extra * 12, after = nowYr + extraYr;
+    const nowPct = Math.min(100, nowYr / r.revenue * 100);
+    const repPct = Math.max(0, Math.min(100, after / r.revenue * 100) - nowPct);
+    const remaining = r.revenue - after;
+    const avgFee = t.count ? t.revenue / t.count : 0;
+    const newClients = remaining > 0 && avgFee > 0 ? Math.ceil(remaining / (avgFee * 12)) : 0;
+    const hoursYr = t.hours * 12;
+    const rateNeeded = hoursYr > 0 ? r.revenue / hoursYr : null;
+    const clientMargin = (t.revenue - t.cost) / t.revenue;
+
+    let html = `<div class="bar-wrap">
+        <div class="bar" role="img" aria-label="Current revenue is ${Math.round(nowYr / r.revenue * 100)}% of the revenue needed"><span class="now" style="width:${nowPct}%;float:left;"></span><span class="reprice" style="width:${repPct}%;float:left;"></span></div>
+        <div class="bar-legend"><span><i style="background:var(--blue)"></i>Current revenue ${money(nowYr)} (${Math.round(nowYr / r.revenue * 100)}%)</span><span><i style="background:var(--gold)"></i>Repricing +${money(extraYr)}</span><span>Needed ${money(r.revenue)}</span></div>
+      </div>
+      <div class="summary-grid">`;
+    if (remaining > 0) {
+      html += `<div class="stat highlight"><div class="label">Still to find after repricing</div><div class="value">${money(remaining)}</div><div class="sub">About ${newClients} new client${newClients === 1 ? "" : "s"} at your average fee of ${money(avgFee)} / month</div></div>`;
+    } else {
+      html += `<div class="stat highlight"><div class="label">After repricing</div><div class="value">${money(-remaining)} ahead</div><div class="sub">Your current clients, repriced, meet the target</div></div>`;
+    }
+    if (rateNeeded !== null) {
+      html += `<div class="stat teal"><div class="label">Rate needed at your current hours</div><div class="value">${money(rateNeeded, 2)}</div><div class="sub">Your clients take ${hrs(hoursYr)} hrs a year. To hit the target without adding hours, this is the average you'd need.</div></div>`;
+    }
+    if (r.hours !== null) {
+      html += `<div class="stat"><div class="label">Hours: now vs needed</div><div class="value">${hrs(hoursYr)} / ${hrs(r.hours)}</div><div class="sub">hours a year across your team</div></div>`;
+    }
+    html += `<div class="stat navy"><div class="label">Clients' gross margin</div><div class="value">${pct(clientMargin)}</div><div class="sub">${clientMargin >= r.gpPct ? "At or above" : "Below"} your ${pct(r.gpPct)} target${clientMargin < r.gpPct ? ". Review team hours and direct costs on the Client pricing tab." : ""}</div></div>
+      </div>`;
+    $("ptCompare").innerHTML = html;
+  }
+
   function renderOutputs() {
     updateRowOutputs();
     renderSummary();
     renderRepricing();
+    renderProfitTarget();
   }
 
   function renderAll() {
     els.targetRate.value = state.targetRate;
     els.currency.value = state.currency;
     els.teamCostRate.value = state.teamCostRate ?? "";
-    els.desiredIncome.value = state.desiredIncome;
+    const p = state.pt;
+    $(p.basis === "month" ? "ptBasisMonth" : "ptBasisYear").checked = true;
+    ["netProfit", "taxRate", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
+      $("pt" + f.charAt(0).toUpperCase() + f.slice(1)).value = p[f] ?? "";
+    });
     renderRows();
     renderSummary();
     renderRepricing();
+    renderProfitTarget();
   }
 
   // ---------- events ----------
   els.targetRate.addEventListener("input", () => { state.targetRate = els.targetRate.value; save(); renderOutputs(); });
-  els.desiredIncome.addEventListener("input", () => { state.desiredIncome = els.desiredIncome.value; save(); renderOutputs(); });
+  ["netProfit", "taxRate", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
+    const el = $("pt" + f.charAt(0).toUpperCase() + f.slice(1));
+    el.addEventListener("input", () => { state.pt[f] = el.value; save(); renderOutputs(); });
+  });
+  document.querySelectorAll('input[name="ptBasis"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      const next = el.value, prev = state.pt.basis;
+      if (next === prev) return;
+      // Convert the money figures so the target stays the same
+      const f = next === "month" ? 1 / 12 : 12;
+      ["netProfit", "overheads"].forEach((k) => {
+        if (state.pt[k] !== "" && state.pt[k] != null) state.pt[k] = String(Math.round(num(state.pt[k]) * f));
+      });
+      state.pt.basis = next;
+      save();
+      renderAll();
+    });
+  });
+  $("ptUseMargin").addEventListener("click", () => {
+    state.pt.gpPct = $("ptUseMargin").dataset.margin;
+    $("ptGpPct").value = state.pt.gpPct;
+    save();
+    renderOutputs();
+  });
+
+  // Tabs
+  const TABS = ["profit-target", "client-pricing"];
+  function showTab(name, focus) {
+    if (!TABS.includes(name)) name = TABS[0];
+    TABS.forEach((t) => {
+      const on = t === name;
+      $("tab-" + t).setAttribute("aria-selected", on);
+      $("tab-" + t).tabIndex = on ? 0 : -1;
+      $("panel-" + t).hidden = !on;
+    });
+    if (focus) $("tab-" + name).focus();
+  }
+  document.querySelectorAll(".tab").forEach((b) => {
+    b.addEventListener("click", () => {
+      showTab(b.dataset.tab);
+      try { history.replaceState(null, "", "#" + b.dataset.tab); } catch (e) { location.hash = b.dataset.tab; }
+    });
+    b.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const i = TABS.indexOf(b.dataset.tab) + (e.key === "ArrowRight" ? 1 : -1);
+      const next = TABS[(i + TABS.length) % TABS.length];
+      showTab(next, true);
+      try { history.replaceState(null, "", "#" + next); } catch (err) { /* ignore */ }
+    });
+  });
+  window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
   els.teamCostRate.addEventListener("input", () => { state.teamCostRate = els.teamCostRate.value; save(); renderOutputs(); });
   els.currency.addEventListener("change", () => { state.currency = els.currency.value; save(); renderOutputs(); });
 
@@ -572,7 +876,7 @@ const MARKET_BENCHMARKS = {
 
   $("clearBtn").addEventListener("click", () => {
     if (!confirm("Clear all clients and targets? This can't be undone.")) return;
-    state = { targetRate: "", currency: state.currency, teamCostRate: "", desiredIncome: "", clients: [] };
+    state = { targetRate: "", currency: state.currency, teamCostRate: "", pt: emptyPt(), clients: [] };
     save();
     renderAll();
   });
@@ -584,7 +888,12 @@ const MARKET_BENCHMARKS = {
 
   // ---------- init ----------
   const saved = load();
-  if (saved) state = Object.assign(state, saved);
+  if (saved) {
+    state = Object.assign(state, saved);
+    state.pt = Object.assign(emptyPt(), saved.pt || {});
+    delete state.desiredIncome;
+  }
+  showTab(location.hash.slice(1));
   renderAll();
 })();
 </script>
