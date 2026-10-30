@@ -121,6 +121,8 @@ const CAPACITY_GUIDE = {
   td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th.num, td.num { text-align: right; }
   #clientTable input[data-field="name"] { min-width: 140px; }
+  #clientTable input.na { background: #EFECE4; border-color: #EFECE4; cursor: not-allowed; }
+  #clientTable input.na::placeholder { color: #B5AFA2; }
   #clientTable input.ends { width: 80px; padding: 8px 6px; font-size: .85rem; }
   /* The remove column stays in view when the table scrolls sideways */
   #clientTable th.col-remove, #clientTable td.col-remove { position: sticky; right: 0; z-index: 1; background: var(--white); box-shadow: -8px 0 8px -8px rgba(7,58,89,.25); }
@@ -734,19 +736,21 @@ const CAPACITY_GUIDE = {
     return t > 0 ? t : num(state.targetRate);
   }
 
+  // Courses and software are sold, not billed by time: no hours, team hours, WIP or rate check
+  const isProductType = (c) => c.type === "course" || c.type === "software";
+
   function analyse(client) {
     const target = targetFor(client);
+    const isProduct = isProductType(client);
     const fee = num(client.fee);
-    const wip = num(client.wip);
+    const wip = isProduct ? 0 : num(client.wip);
     const per = freqMonths(client);
     const wipMonthly = wip / Math.max(1, num(state.periodMonths) || 1);
     const wipBill = wipMonthly * per;
     const revenue = fee + wipBill;
-    const hours = num(client.hours);
-    // Courses and software are sold, not billed by time: no hours or rate check
-    const isProduct = client.type === "course" || client.type === "software";
-    const rate = hours > 0 && !isProduct ? revenue / hours : null;
-    const cost = num(client.teamHours) * num(state.teamCostRate) + num(client.otherCosts);
+    const hours = isProduct ? 0 : num(client.hours);
+    const rate = hours > 0 ? revenue / hours : null;
+    const cost = (isProduct ? 0 : num(client.teamHours)) * num(state.teamCostRate) + num(client.otherCosts);
     const grossProfit = revenue - cost;
     const margin = revenue > 0 ? grossProfit / revenue : null;
     const isEnded = leftOut(client);
@@ -842,7 +846,8 @@ const CAPACITY_GUIDE = {
   }
 
   // ---------- rendering ----------
-  function numInput(field, value, label) {
+  function numInput(field, value, label, off) {
+    if (off) return `<input class="calc na" type="text" value="" disabled placeholder="—" aria-label="${label} (not used for this category)" title="Not used for courses or software">`;
     return `<input class="calc" type="text" inputmode="decimal" data-field="${field}" value="${escapeHtml(value ?? "")}" aria-label="${label}">`;
   }
 
@@ -871,10 +876,10 @@ const CAPACITY_GUIDE = {
         <td><select data-field="freq" aria-label="How often they're billed">${freqOpts}</select></td>
         <td><input type="text" class="ends" data-field="ends" value="${escapeHtml(c.ends ? monthLabel(c.ends) : "")}" placeholder="Ongoing" aria-label="Last month billed (blank if ongoing)" title="Last month you'll bill them, such as Mar 2027. Leave blank if ongoing."></td>
         <td class="num"><div class="fee-cell"><span data-out="reset" class="orig-slot"></span>${numInput("fee", c.fee, "Fee per bill")}</div></td>
-        <td class="num">${numInput("hours", c.hours, "Hours per bill")}</td>
-        <td class="num">${numInput("teamHours", c.teamHours, "Team hours per bill")}</td>
+        <td class="num">${numInput("hours", c.hours, "Hours per bill", isProductType(c))}</td>
+        <td class="num">${numInput("teamHours", c.teamHours, "Team hours per bill", isProductType(c))}</td>
         <td class="num">${numInput("otherCosts", c.otherCosts, "Other direct costs per bill")}</td>
-        <td class="num">${numInput("wip", c.wip, "Unbilled work in progress, dollars")}</td>
+        <td class="num">${numInput("wip", c.wip, "Unbilled work in progress, dollars", isProductType(c))}</td>
         <td class="num" data-out="rate"></td>
         <td data-out="status"></td>
         <td class="num" data-out="needed"></td>
