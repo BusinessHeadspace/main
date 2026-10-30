@@ -116,17 +116,64 @@
   }
 
   // ---------- Saving ----------
+  // Saving: soon after a change (one write at a time), straight away if the page is
+  // closing or reloading. Each open copy has its own id so it can tell its own saves
+  // from another tab's.
+  const TAB = Math.random().toString(36).slice(2);
+  let lastSaved = 0;      // savedAt of the newest copy this tab has written or loaded
+  let dirty = false, writing = false;
+
+  async function writeNow() {
+    clearTimeout(writeTimer);
+    if (!store || !dirty) return;
+    if (writing) { writeTimer = setTimeout(writeNow, 300); return; }
+    dirty = false;
+    writing = true;
+    const savedAt = Date.now();
+    lastSaved = savedAt;
+    try {
+      await store.set({ state: window.PPC.getState(), sync: saved.sync, xero: saved.xero, savedAt, tab: TAB });
+    } catch (e) {
+      dirty = true;
+      say("Your changes couldn't be saved to your account just now. They're still kept in this browser.", true);
+    } finally {
+      writing = false;
+    }
+  }
+
   function persist() {
     if (!store) return;
+    dirty = true;
     clearTimeout(writeTimer);
-    writeTimer = setTimeout(async () => {
-      try {
-        await store.set({ state: window.PPC.getState(), sync: saved.sync, xero: saved.xero, savedAt: Date.now() });
-      } catch (e) {
-        say("Your changes couldn't be saved to your account just now. They're still kept in this browser.", true);
-      }
-    }, 1200);
+    writeTimer = setTimeout(writeNow, 400);
   }
+  window.addEventListener("pagehide", writeNow);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") writeNow(); });
+
+  // A newer save from another open copy of this page (another tab or device) replaces
+  // what this one shows, so an older copy can't save over it. Waits while you're typing.
+  let pendingRemote = null;
+  function applyRemote(d) {
+    if (dirty || writing) return;              // this tab's own newer change wins
+    lastSaved = d.savedAt;
+    saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, d.sync || {}), xero: d.xero || null };
+    if (d.state) window.PPC.setState(JSON.parse(JSON.stringify(d.state)));
+    dirty = false;                             // setState saved locally; nothing new to write
+    clearTimeout(writeTimer);
+    renderHeader(); renderSettings(); renderYtd();
+  }
+  function onRemote(snap) {
+    if (!snap.exists) return;
+    const d = snap.data();
+    if (!d || d.tab === TAB || !(d.savedAt > lastSaved)) return;
+    const el = document.activeElement;
+    if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) { pendingRemote = d; return; }
+    applyRemote(d);
+  }
+  document.addEventListener("focusout", () => setTimeout(() => {
+    const el = document.activeElement;
+    if (pendingRemote && !(el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))) { const d = pendingRemote; pendingRemote = null; applyRemote(d); }
+  }, 0));
 
   window.PPC.onChange = () => { persist(); renderYtd(); };
   window.PPC.onClientChange = (c, field) => {
@@ -571,7 +618,12 @@
             const d = snap.data();
             saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, d.sync || {}), xero: d.xero || null };
             if (d.state) window.PPC.setState(JSON.parse(JSON.stringify(d.state)));
+            lastSaved = d.savedAt || 0;
+            dirty = false;
+            clearTimeout(writeTimer);
           }
+          // Keep this copy in step with saves from other open copies
+          if (typeof store.onSnapshot === "function") store.onSnapshot(onRemote, () => { /* live updates stopped; saving still works */ });
         }
       } catch (e) {
         store = null;
