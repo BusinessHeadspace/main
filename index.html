@@ -1273,6 +1273,7 @@ const CAPACITY_GUIDE = {
     ["netProfit", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
       $("pt" + f.charAt(0).toUpperCase() + f.slice(1)).value = p[f] ?? "";
     });
+    autoRemoveEnded();
     renderRows();
     renderSummary();
     renderRepricing();
@@ -1304,7 +1305,16 @@ const CAPACITY_GUIDE = {
       if (v === null) { showFileMsg("Type the last month billed, such as Mar 2027, or leave it blank if ongoing.", true); return; }
       e.target.value = v ? monthLabel(v) : "";
       const c = state.clients[+tr.dataset.i];
-      if ((c.ends || "") !== v) { c.ends = v; save(); renderRows(); renderOutputs(); }
+      if ((c.ends || "") !== v) {
+        c.ends = v;
+        save();
+        const moved = autoRemoveEnded();
+        renderRows();
+        renderOutputs();
+        if (moved.includes(c)) {
+          showUndo(`${c.name || "That client"} ended in ${monthLabel(v)}, so it's moved to Removed.`, () => setRemoved(c, false));
+        }
+      }
     }
   });
 
@@ -1447,6 +1457,22 @@ const CAPACITY_GUIDE = {
     renderOutputs();
   }
 
+  // Clients whose end date has passed move to Removed by themselves, once per end date
+  // (put one back and it stays, unless you give it another past end date)
+  function autoRemoveEnded() {
+    const moved = [];
+    state.clients.forEach((c) => {
+      if (ended(c) && !c.removed && c.autoRemovedFor !== c.ends) {
+        c.removed = true;
+        c.autoRemovedFor = c.ends;
+        moved.push(c);
+        try { if (window.PPC && typeof window.PPC.onRemoveClient === "function") window.PPC.onRemoveClient(c); } catch (err) { /* still removed */ }
+      }
+    });
+    if (moved.length) save();
+    return moved;
+  }
+
   function renderRemovedPanel() {
     const list = state.clients.map((c, i) => ({ c, i })).filter((x) => x.c.removed);
     $("removedBtn").hidden = !list.length;
@@ -1456,8 +1482,8 @@ const CAPACITY_GUIDE = {
     list.sort((a, b) => String(a.c.name || "").localeCompare(String(b.c.name || ""), undefined, { sensitivity: "base" }));
     panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
         <strong>Removed clients</strong><button type="button" class="link-btn" data-restore-all>Put all back</button></div>
-      <p class="table-note" style="margin:4px 0 8px;">These are left out of the table and all totals, and stay out when you refresh.</p>
-      <ul>${list.map((x) => `<li><span>${escapeHtml(x.c.name || "Unnamed client")}${serviceOf(x.c) ? ` <span class="muted">· ${serviceLabel(serviceOf(x.c))}</span>` : ""}</span><button type="button" class="link-btn" data-restore="${x.i}">Put back</button></li>`).join("")}</ul>`;
+      <p class="table-note" style="margin:4px 0 8px;">These are left out of the table and all totals, and stay out when you refresh. Clients move here by themselves once their end date has passed.</p>
+      <ul>${list.map((x) => `<li><span>${escapeHtml(x.c.name || "Unnamed client")}${serviceOf(x.c) ? ` <span class="muted">· ${serviceLabel(serviceOf(x.c))}</span>` : ""}${x.c.ends && x.c.autoRemovedFor === x.c.ends && ended(x.c) ? ` <span class="muted">· ended ${monthLabel(x.c.ends)}</span>` : ""}</span><button type="button" class="link-btn" data-restore="${x.i}">Put back</button></li>`).join("")}</ul>`;
   }
 
   els.rows.addEventListener("toggle", (e) => {

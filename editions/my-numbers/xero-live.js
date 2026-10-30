@@ -395,6 +395,7 @@
         removed: removedKeys.has(xc.id) || removedKeys.has(xc.cid) || undefined,
         noteDismissed: old.noteDismissed, origDismissed: old.origDismissed,
         ends: old.ends || "",
+        autoRemovedFor: old.autoRemovedFor,
         note: xc.note, noteWarn: xc.noteWarn,
         source: "xero", xeroContactId: xc.cid, xeroKey: xc.id
       };
