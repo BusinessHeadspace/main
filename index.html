@@ -876,7 +876,11 @@ const CAPACITY_GUIDE = {
       els.rows.innerHTML = `<tr><td colspan="${COLS}" class="empty">No clients yet. Click <strong>+ Add client</strong> or <strong>Load sample data</strong> to get started.</td></tr>`;
       return;
     }
+    // Billing period first (monthly, 2-monthly ... ad hoc), then A-Z
+    const freqRank = (c) => { const i = FREQS.findIndex((f) => f.id === String(c.freq)); return i < 0 ? 0 : i; };
     const byName = (a, b) => {
+      const r = freqRank(a.c) - freqRank(b.c);
+      if (r) return r;
       const x = String(a.c.name || "").trim(), y = String(b.c.name || "").trim();
       if (!x || !y) return x ? -1 : y ? 1 : 0;   // unnamed rows last
       return x.localeCompare(y, undefined, { sensitivity: "base", numeric: true });
