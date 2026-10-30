@@ -394,6 +394,7 @@
         otherCosts: youChangedOther || xeroOther === undefined ? (old.otherCosts ?? "") : xeroOther, xeroOtherCosts: xeroOther,
         noReprice: !!old.noReprice,
         noteDismissed: old.noteDismissed, origDismissed: old.origDismissed,
+        ends: old.ends || "",
         note: xc.note, noteWarn: xc.noteWarn,
         source: "xero", xeroContactId: xc.cid, xeroKey: xc.id
       };

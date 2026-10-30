@@ -120,7 +120,19 @@ const CAPACITY_GUIDE = {
   }
   td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th.num, td.num { text-align: right; }
-  #clientTable input[data-field="name"] { min-width: 170px; }
+  #clientTable input[data-field="name"] { min-width: 150px; }
+  #clientTable input.ends { width: 86px; padding: 8px 6px; font-size: .85rem; }
+  #clientTable input.ends:placeholder-shown { background: transparent; }
+  #clientTable tr.ended td { opacity: .5; }
+  #clientTable tr.ended td:first-child, #clientTable tr.ended td:nth-child(4), #clientTable tr.ended td:last-child { opacity: 1; }
+  .status.ended { color: var(--muted); background: #F0EEE8; }
+  .forecast { margin-top: 18px; }
+  .forecast h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+  .fc-bars { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; align-items: end; height: 110px; }
+  .fc-bar { position: relative; background: var(--teal); border-radius: 4px 4px 0 0; min-height: 2px; }
+  .fc-bar.drop { background: var(--gold); }
+  .fc-labels { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; margin-top: 4px; font-size: .7rem; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
+  .fc-labels b { display: block; color: var(--navy); font-weight: 600; }
   #clientTable input.calc { width: 70px; text-align: right; padding: 8px 7px; }
   #clientTable select { padding: 7px 4px; font-size: .82rem; width: 112px; }
   #clientTable select[data-field="freq"] { width: 96px; }
@@ -482,6 +494,7 @@ const CAPACITY_GUIDE = {
             <th>Client name</th>
             <th class="col-cat">Category</th>
             <th>Billed</th>
+            <th>Ends</th>
             <th class="num">Fee per bill</th>
             <th class="num">Hours per bill</th>
             <th class="num">Team hours per bill</th>
@@ -503,7 +516,7 @@ const CAPACITY_GUIDE = {
       <span class="status amber">Within 15% below</span>
       <span class="status red">More than 15% below</span>
     </div>
-    <p class="table-note"><strong>Fees, hours and costs are per bill</strong>: what you charge each time you invoice, and the time that takes. Set <strong>Billed</strong> for clients you don't bill monthly (such as 2-monthly GST or 6-monthly reviews). Use <strong>Change categories</strong> to move a client to another category. Totals, the summary and Fill the gap convert everything to monthly. <strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are what it costs you to serve that client each bill, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses, programmes and software don't need hours.</p>
+    <p class="table-note"><strong>Fees, hours and costs are per bill</strong>: what you charge each time you invoice, and the time that takes. Set <strong>Billed</strong> for clients you don't bill monthly (such as 2-monthly GST or 6-monthly reviews). Use <strong>Change categories</strong> to move a client to another category. <strong>Ends</strong> is the last month you'll bill them, for payment plans or subscriptions that are stopping; after that they drop out of your revenue. Totals, the summary and Fill the gap convert everything to monthly. <strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are what it costs you to serve that client each bill, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses, programmes and software don't need hours.</p>
   </section>
 
   <!-- Summary -->
@@ -577,9 +590,31 @@ const CAPACITY_GUIDE = {
   // Months each bill covers (ad hoc fees are already a monthly average)
   const freqMonths = (c) => (FREQS.find((f) => f.id === String(c.freq)) || FREQS[0]).months;
   const freqLabel = (c) => (FREQS.find((f) => f.id === String(c.freq)) || FREQS[0]).label;
+  // End dates are stored as "YYYY-MM" (the last month billed)
+  const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const monthIdx = (ym) => +ym.slice(0, 4) * 12 + (+ym.slice(5, 7) - 1);
+  const nowIdx = (() => { const d = new Date(); return d.getFullYear() * 12 + d.getMonth(); })();
+  const idxLabel = (i) => new Date(Math.floor(i / 12), i % 12, 1).toLocaleDateString("en-NZ", { month: "short", year: "numeric" });
+  const monthLabel = (ym) => idxLabel(monthIdx(ym));
+  // "Mar 2027", "March 27", "2027-03", "3/2027", "03/27" -> "2027-03"; "" for blank; null if not a month
+  function parseMonth(v) {
+    const t = String(v || "").trim().toLowerCase();
+    if (!t || t === "ongoing") return "";
+    let m = t.match(/^(\d{4})[-/.](\d{1,2})$/);
+    if (m) return +m[2] >= 1 && +m[2] <= 12 ? `${m[1]}-${String(+m[2]).padStart(2, "0")}` : null;
+    m = t.match(/^(\d{1,2})[-/.](\d{2}|\d{4})$/);
+    if (m) { const y = m[2].length === 2 ? 2000 + +m[2] : +m[2]; return +m[1] >= 1 && +m[1] <= 12 ? `${y}-${String(+m[1]).padStart(2, "0")}` : null; }
+    m = t.match(/^([a-z]{3,9})\.?\s*'?(\d{2}|\d{4})$/);
+    if (m) { const mi = MONTHS.indexOf(m[1].slice(0, 3)); const y = m[2].length === 2 ? 2000 + +m[2] : +m[2]; return mi >= 0 ? `${y}-${String(mi + 1).padStart(2, "0")}` : null; }
+    return null;
+  }
+  const ended = (c) => !!c.ends && monthIdx(c.ends) < nowIdx;
+  const activeIn = (c, i) => !c.ends || monthIdx(c.ends) >= i;
+  // Months billed in the next 12, counting this month
+  const monthsLeft = (c) => (c.ends ? Math.max(0, Math.min(12, monthIdx(c.ends) - nowIdx + 1)) : 12);
   const serviceOf = (c) => (SERVICES.some((x) => x.id === c.type) ? c.type : "");
   const serviceLabel = (id) => (SERVICES.find((x) => x.id === id) || { label: "Not grouped yet" }).label;
-  const COLS = 13;
+  const COLS = 14;
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -702,6 +737,7 @@ const CAPACITY_GUIDE = {
     const cost = num(client.teamHours) * num(state.teamCostRate) + num(client.otherCosts);
     const grossProfit = revenue - cost;
     const margin = revenue > 0 ? grossProfit / revenue : null;
+    const isEnded = ended(client);
     let status = isProduct ? "product" : "none";
     let neededFee = null;
     if (rate !== null && target > 0) {
@@ -711,17 +747,20 @@ const CAPACITY_GUIDE = {
       else status = "red";
       if (rate < target) neededFee = target * hours - wipBill;
     }
+    if (isEnded) { status = "ended"; neededFee = null; }
     const skipped = !!client.noReprice;
     const extra = neededFee !== null && !skipped ? neededFee - fee : 0;
-    const missingHours = !isProduct && revenue > 0 && !(hours > 0);
+    const missingHours = !isProduct && !isEnded && revenue > 0 && !(hours > 0);
     // Monthly equivalents for totals
     const m = { fee: fee / per, hours: hours / per, cost: cost / per, revenue: revenue / per, extra: extra / per };
-    return { fee, wip, wipMonthly, revenue, hours, rate, target, status, neededFee, extra, skipped, cost, grossProfit, margin, isProduct, missingHours, per, m };
+    if (isEnded) Object.keys(m).forEach((k) => { m[k] = 0; });
+    const left = isEnded ? 0 : monthsLeft(client);
+    return { fee, wip, wipMonthly, revenue, hours, rate, target, status, neededFee, extra, skipped, cost, grossProfit, margin, isProduct, missingHours, per, m, ended: isEnded, left };
   }
 
   // Totals across the client list (monthly figures)
   function clientTotals() {
-    const t = { revenue: 0, hours: 0, cost: 0, extra: 0, count: 0, missing: 0, wip: 0, rateRevenue: 0, rateHours: 0 };
+    const t = { revenue: 0, hours: 0, cost: 0, extra: 0, count: 0, missing: 0, wip: 0, rateRevenue: 0, rateHours: 0, next12: 0, cost12: 0, extra12: 0, ending: 0 };
     state.clients.forEach((c) => {
       const a = analyse(c);
       if (a.missingHours) t.missing++;
@@ -730,8 +769,12 @@ const CAPACITY_GUIDE = {
       t.hours += a.m.hours;
       t.cost += a.m.cost;
       t.extra += a.m.extra;
-      if (a.rate !== null) { t.rateRevenue += a.m.revenue; t.rateHours += a.m.hours; }
-      if (a.fee > 0) t.count++;
+      t.next12 += a.m.fee * a.left;
+      t.cost12 += a.m.cost * a.left;
+      t.extra12 += a.m.extra * a.left;
+      if (!a.ended && c.ends && a.left < 12) t.ending++;
+      if (a.rate !== null && !a.ended) { t.rateRevenue += a.m.revenue; t.rateHours += a.m.hours; }
+      if (a.fee > 0 && !a.ended) t.count++;
     });
     t.avgRate = t.rateHours > 0 ? t.rateRevenue / t.rateHours : null;
     return t;
@@ -763,7 +806,7 @@ const CAPACITY_GUIDE = {
     };
   }
 
-  const STATUS_LABEL = { great: "Well over", green: "On target", amber: "Slightly under", red: "Well under", product: "Course / product", none: "—" };
+  const STATUS_LABEL = { ended: "Ended", great: "Well over", green: "On target", amber: "Slightly under", red: "Well under", product: "Course / product", none: "—" };
 
   // Per-service figures (monthly) for group subtotals and the gap planner
   function serviceStats(id) {
@@ -771,6 +814,7 @@ const CAPACITY_GUIDE = {
     state.clients.forEach((c) => {
       if (serviceOf(c) !== id) return;
       const a = analyse(c);
+      if (a.ended) return;
       g.count++;
       g.fee += a.m.fee;
       g.hours += a.m.hours;
@@ -809,10 +853,11 @@ const CAPACITY_GUIDE = {
     const opts = `<option value="" ${serviceOf(c) ? "" : "selected"}>Choose…</option>` +
       SERVICES.map((x) => `<option value="${x.id}" ${serviceOf(c) === x.id ? "selected" : ""}>${x.label}</option>`).join("");
     return `
-      <tr data-i="${i}">
+      <tr data-i="${i}" class="${ended(c) ? "ended" : ""}">
         <td><div class="name-cell"><input type="text" data-field="name" value="${escapeHtml(c.name ?? "")}" placeholder="Client name" aria-label="Client name">${noteShown(c) ? `<details class="note-d${c.noteWarn ? " warn" : ""}" data-note="${i}" ${openNotes.has(noteKey(c)) ? "open" : ""}><summary title="${escapeHtml(c.note)}" aria-label="${c.noteWarn ? "Check" : "Note"}: ${escapeHtml(c.note)}">${c.noteWarn ? "!" : "i"}</summary><div class="row-note${c.noteWarn ? " warn" : ""}">${escapeHtml(c.note)}<button type="button" class="link-btn note-hide" data-dismiss-note="${i}">Hide this note</button></div></details>` : `<span class="note-spacer"></span>`}</div></td>
         <td class="col-cat"><select data-field="type" aria-label="Category">${opts}</select></td>
         <td><select data-field="freq" aria-label="How often they're billed">${freqOpts}</select></td>
+        <td><input type="text" class="ends" data-field="ends" value="${escapeHtml(c.ends ? monthLabel(c.ends) : "")}" placeholder="Ongoing" aria-label="Last month billed (blank if ongoing)" title="Last month you'll bill them, such as Mar 2027. Leave blank if ongoing."></td>
         <td class="num"><div class="fee-cell"><span data-out="reset" class="orig-slot"></span>${numInput("fee", c.fee, "Fee per bill")}</div></td>
         <td class="num">${numInput("hours", c.hours, "Hours per bill")}</td>
         <td class="num">${numInput("teamHours", c.teamHours, "Team hours per bill")}</td>
@@ -850,9 +895,9 @@ const CAPACITY_GUIDE = {
       <tr class="group"><td colspan="${COLS}">${serviceLabel(g.id)} <span class="muted" style="font-weight:500;">(${g.items.length})</span></td></tr>` : "") +
       g.items.map((x) => rowHtml(x.c, x.i)).join("") + (heads ? `
       <tr class="group-total" data-group="${g.id}">
-        <td>${serviceLabel(g.id)} total per month</td><td class="col-cat"></td><td></td>
+        <td>${serviceLabel(g.id)} total per month</td><td class="col-cat"></td><td></td><td></td>
         <td class="num" data-gout="fee"></td><td class="num" data-gout="hours"></td><td></td><td></td>
-        <td class="num" data-gout="wip"></td><td class="num" data-gout="rate"></td><td colspan="${COLS - 9}"></td>
+        <td class="num" data-gout="wip"></td><td class="num" data-gout="rate"></td><td colspan="${COLS - 10}"></td>
       </tr>` : "")).join("");
     updateRowOutputs();
   }
@@ -887,11 +932,30 @@ const CAPACITY_GUIDE = {
     });
   }
 
+  // Monthly revenue for the next 12 months, dropping clients as their plans end
+  function forecastHtml() {
+    const months = Array.from({ length: 12 }, (_, k) => nowIdx + k);
+    const vals = months.map((i) => state.clients.reduce((t, c) => {
+      if (!activeIn(c, i)) return t;
+      return t + num(c.fee) / freqMonths(c);
+    }, 0));
+    const max = Math.max(...vals, 1);
+    if (!vals.some((v) => v > 0)) return "";
+    return `<div class="forecast">
+      <h3>Monthly revenue, next 12 months</h3>
+      <div class="fc-bars" role="img" aria-label="Monthly revenue from ${money(vals[0])} in ${idxLabel(months[0])} to ${money(vals[11])} in ${idxLabel(months[11])}">
+        ${vals.map((v, k) => `<div class="fc-bar${k && v < vals[k - 1] - 0.5 ? " drop" : ""}" style="height:${(v / max) * 100}%" title="${idxLabel(months[k])}: ${money(v)}"></div>`).join("")}
+      </div>
+      <div class="fc-labels">${vals.map((v, k) => `<span>${idxLabel(months[k]).replace(" 20", " ’")}<b>${v >= 10000 ? money(v / 1000, 1).replace(/\.0$/, "") + "k" : money(v)}</b></span>`).join("")}</div>
+      <p class="table-note" style="margin-top:6px;">Clients drop out after the month in the Ends column. Gold bars are months where revenue falls. Fees billed less often than monthly are spread evenly.</p>
+    </div>`;
+  }
+
   function renderSummary() {
     const t = clientTotals();
-    const annual = t.revenue * 12;
-    const extraAnnual = t.extra * 12;
-    const costAnnual = t.cost * 12;
+    const annual = t.next12;
+    const extraAnnual = t.extra12;
+    const costAnnual = t.cost12;
     const gpAnnual = annual - costAnnual;
     const margin = annual > 0 ? gpAnnual / annual : null;
     const pt = profitTarget();
@@ -911,17 +975,18 @@ const CAPACITY_GUIDE = {
       if (gap <= 0) sub = `You're ahead of the ${money(pt.revenue)} revenue your profit target needs`;
       else if (afterRepricing <= 0) sub = `Repricing alone would close it`;
       else sub = `Still ${money(afterRepricing)} short after repricing. See Fill the gap below`;
+      if (t.ending) sub += `. Counts only the months left on plans that are ending`;
       html += `<div class="stat highlight"><div class="label">${gap > 0 ? "Revenue gap to profit target" : "Ahead of profit target"}</div><div class="value">${money(Math.abs(gap))}</div><div class="sub">${sub}.</div></div>`;
     } else {
       html += `<div class="stat highlight"><div class="label">Revenue gap to profit target</div><div class="value">—</div><div class="sub">Fill in the Profit target tab to see this.</div></div>`;
     }
     html += `</div><div class="mini-stats">
       <span>Monthly revenue <strong>${money(t.revenue)}</strong></span>
-      <span>Annual revenue <strong>${money(annual)}</strong></span>
+      <span>Next 12 months <strong>${money(annual)}</strong>${t.ending ? ` (${t.ending} plan${t.ending === 1 ? "" : "s"} ending)` : ""}</span>
       ${t.wip ? `<span>WIP to bill <strong>${money(t.wip)}</strong></span>` : ""}
-      <span>Cost of sales / year <strong>${money(costAnnual)}</strong></span>
-      <span>Gross profit / year <strong>${money(gpAnnual)}</strong>${margin === null ? "" : ` (${pct(margin)})`}</span>
-    </div>`;
+      <span>Cost of sales, next 12 months <strong>${money(costAnnual)}</strong></span>
+      <span>Gross profit, next 12 months <strong>${money(gpAnnual)}</strong>${margin === null ? "" : ` (${pct(margin)})`}</span>
+    </div>${forecastHtml()}`;
     els.summary.innerHTML = html;
   }
 
@@ -948,7 +1013,7 @@ const CAPACITY_GUIDE = {
 
     const under = state.clients
       .map((c, i) => ({ c, i, a: analyse(c) }))
-      .filter((x) => x.a.neededFee !== null)
+      .filter((x) => x.a.neededFee !== null && !x.a.ended)
       .sort((x, y) => (x.a.skipped - y.a.skipped) || (x.a.rate / x.a.target - y.a.rate / y.a.target));
 
     if (state.clients.length === 0) {
@@ -1041,7 +1106,7 @@ const CAPACITY_GUIDE = {
       $("ptCompare").innerHTML = '<p class="muted">Add your clients on the Client pricing tab to see how close they get you.</p>';
       return;
     }
-    const nowYr = t.revenue * 12, extraYr = t.extra * 12, after = nowYr + extraYr;
+    const nowYr = t.next12, extraYr = t.extra12, after = nowYr + extraYr;
     const nowPct = Math.min(100, nowYr / r.revenue * 100);
     const repPct = Math.max(0, Math.min(100, after / r.revenue * 100) - nowPct);
     const remaining = r.revenue - after;
@@ -1116,7 +1181,7 @@ const CAPACITY_GUIDE = {
   function planFigures() {
     const p = state.plan;
     const t = clientTotals();
-    const f = { reprice: p.reprice ? t.extra * 12 : 0, wip: p.wip ? t.wip : 0, courses: num(p.courses) * num(p.coursePrice), other: num(p.other), hours: {} };
+    const f = { reprice: p.reprice ? t.extra12 : 0, wip: p.wip ? t.wip : 0, courses: num(p.courses) * num(p.coursePrice), other: num(p.other), hours: {} };
     PLAN_SERVICES.forEach((id) => {
       const g = serviceStats(id);
       const n = num(p.n[id]);
@@ -1143,7 +1208,7 @@ const CAPACITY_GUIDE = {
     });
     set("total", money(f.total));
     set("total-h", f.totalHours ? "+" + hrs(f.totalHours, 1) : "—");
-    const annual = t.revenue * 12;
+    const annual = t.next12;
     const gap = Math.max(0, pt.revenue - annual);
     const covered = gap > 0 ? Math.min(1, f.total / gap) : 1;
     const left = gap - f.total;
@@ -1195,8 +1260,21 @@ const CAPACITY_GUIDE = {
   }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && e.target.classList && e.target.classList.contains("calc")) { e.preventDefault(); settleSum(e.target); }
+    if (e.key === "Enter" && e.target.classList && e.target.classList.contains("ends")) { e.preventDefault(); e.target.blur(); }
   });
-  document.addEventListener("focusout", (e) => { if (e.target.classList && e.target.classList.contains("calc")) settleSum(e.target); });
+  document.addEventListener("focusout", (e) => {
+    if (!e.target.classList) return;
+    if (e.target.classList.contains("calc")) settleSum(e.target);
+    if (e.target.classList.contains("ends")) {
+      const tr = e.target.closest("tr[data-i]");
+      const v = parseMonth(e.target.value);
+      if (!tr) return;
+      if (v === null) { showFileMsg("Type the last month billed, such as Mar 2027, or leave it blank if ongoing.", true); return; }
+      e.target.value = v ? monthLabel(v) : "";
+      const c = state.clients[+tr.dataset.i];
+      if ((c.ends || "") !== v) { c.ends = v; save(); renderRows(); renderOutputs(); }
+    }
+  });
 
   ["coaching", "consulting", "bookkeeping"].forEach((id) => {
     const el = $("rate" + id[0].toUpperCase() + id.slice(1));
@@ -1282,7 +1360,7 @@ const CAPACITY_GUIDE = {
   els.rows.addEventListener("input", (e) => {
     const field = e.target.dataset.field;
     const tr = e.target.closest("tr[data-i]");
-    if (!field || !tr) return;
+    if (!field || !tr || field === "ends") return;
     state.clients[+tr.dataset.i][field] = e.target.value;
     save();
     if (field === "type") renderRows();
