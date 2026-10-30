@@ -234,6 +234,13 @@
       if (!res.total_page_count || page >= res.total_page_count) break;
     }
 
+    // Repeating invoices still set up in Xero, to tell a stopped plan from a live one
+    let repeating = null;
+    try {
+      const r = await call("get_repeating_invoices", { organisation_id: id });
+      repeating = (r.repeating_invoices || []).map((t) => ({ id: t.template_id, cid: t.contact && t.contact.contact_id }));
+    } catch (e) { /* without it, plans are judged by their invoices alone */ }
+
     // Keep only what the calculator uses, so the saved copy stays small
     const slimPnl = (r) => ({
       current_pnl: r.current_pnl,
@@ -247,6 +254,7 @@
     const slimInvoices = invoices.map((inv) => ({
       contact: { contact_id: inv.contact && inv.contact.contact_id, name: inv.contact && inv.contact.name },
       invoice_date: inv.invoice_date,
+      rep: inv.repeating_invoice_id || undefined,
       line_items: (inv.line_items || []).filter((l) => l.account_code).map((l) => ({
         account_code: l.account_code, quantity: l.quantity, line_amount_net_base_currency: l.line_amount_net_base_currency
       }))
@@ -257,7 +265,7 @@
       orgId: id, orgName: org.name, fyStart: iso(fyStart), lastStart: iso(lastStart), lastEnd: iso(lastEnd),
       winStart: iso(winStart), winEnd: iso(winEnd), months, lastYear: slimPnl(lastYear), ytd: slimPnl(ytd), win: slimPnl(win),
       accounts: (chart.accounts || []).filter((a) => used.has(a.code)).map((a) => ({ code: a.code, name: a.name, type: a.type })),
-      invoices: slimInvoices
+      invoices: slimInvoices, repeating
     };
   }
 
@@ -332,12 +340,17 @@
         if (inv.invoice_date < c.first) c.first = inv.invoice_date;
         if (inv.invoice_date > c.last) c.last = inv.invoice_date;
         c.months.add(inv.invoice_date.slice(0, 7));
+        if (inv.rep) (c.reps = c.reps || new Set()).add(inv.rep);
         by.set(key, c);
       });
     });
     const parts = new Map();
     by.forEach((c) => { if (c.total > 0) parts.set(c.cid, (parts.get(c.cid) || 0) + 1); });
     const endIdx = end.getFullYear() * 12 + end.getMonth();
+    // Billed from a repeating invoice that has since been deleted, with none left for the contact
+    const liveIds = new Set((x.repeating || []).map((t) => t.id));
+    const liveContacts = new Set((x.repeating || []).map((t) => t.cid));
+    const repStopped = (c) => !!x.repeating && !!c.reps && ![...c.reps].some((r) => liveIds.has(r)) && !liveContacts.has(c.cid);
     return [...by.values()].filter((c) => c.total > 0).map((c) => {
       const f = new Date(c.first + "T00:00:00");
       const active = Math.max(1, Math.min(x.months, endIdx - (f.getFullYear() * 12 + f.getMonth()) + 1));
@@ -359,7 +372,7 @@
         id: c.id, cid: c.cid, svc: c.svc, type: c.svc, baseName: c.name, split: parts.get(c.cid) > 1,
         name: parts.get(c.cid) > 1 ? `${c.name} · ${SVC_LABEL[c.svc]}` : c.name,
         total: c.total, qty: c.qty, hourly: c.hourly && c.svc !== "software" && c.svc !== "course",
-        billed, active, last: idx[billed - 1], endIdx, freq
+        billed, active, last: idx[billed - 1], endIdx, freq, repStopped: repStopped(c)
       };
     }).sort((a, b) => b.total - a.total);
   }
@@ -373,10 +386,14 @@
     const per = adhoc ? x.months : xc.billed;
     const fm = FREQ_MONTHS[freq] || 1;
     let note = "", warn = false, ends = "";
-    if (adhoc) {
+    const lastYm = Math.floor(xc.last / 12) + "-" + String(xc.last % 12 + 1).padStart(2, "0");
+    if (!adhoc && xc.repStopped) {
+      note = `The repeating invoice has been stopped in Xero: last billed ${monthName(lastYm)}, so it ends then.`;
+      ends = lastYm;
+    } else if (adhoc) {
       note = `Ad hoc: billed ${money(xc.total)} in ${xc.billed} of the last ${x.months} months. Shown as a monthly average.`;
     } else if (xc.last + fm <= xc.endIdx) {
-      const ym = Math.floor(xc.last / 12) + "-" + String(xc.last % 12 + 1).padStart(2, "0");
+      const ym = lastYm;
       if (xc.svc === "course") {
         // A course payment plan that has stopped being billed has finished
         note = `Payment plan finished: last billed ${monthName(ym)}, so it ends then.`;
