@@ -482,6 +482,7 @@ const CAPACITY_GUIDE = {
     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
       <h2 style="margin:0;">Clients</h2>
       <div class="toolbar no-print">
+        <button class="btn btn-outline" id="adhocBtn" type="button" hidden>Remove ad hoc</button>
         <button class="btn btn-outline" id="catBtn" type="button" aria-pressed="false">Change categories</button>
         <button class="btn btn-outline" id="notesBtn" type="button" hidden>Show all notes</button>
         <button class="btn btn-outline" id="restoreBtn" type="button" hidden title="Show the notes and Xero figures you've hidden">Bring back hidden</button>
@@ -611,6 +612,8 @@ const CAPACITY_GUIDE = {
     return null;
   }
   const ended = (c) => !!c.ends && monthIdx(c.ends) < nowIdx;
+  const isAdhoc = (c) => String(c.freq) === "adhoc";
+  const leftOut = (c) => ended(c) || (!!state.hideAdhoc && isAdhoc(c));
   const activeIn = (c, i) => !c.ends || monthIdx(c.ends) >= i;
   // Months billed in the next 12, counting this month
   const monthsLeft = (c) => (c.ends ? Math.max(0, Math.min(12, monthIdx(c.ends) - nowIdx + 1)) : 12);
@@ -739,7 +742,7 @@ const CAPACITY_GUIDE = {
     const cost = num(client.teamHours) * num(state.teamCostRate) + num(client.otherCosts);
     const grossProfit = revenue - cost;
     const margin = revenue > 0 ? grossProfit / revenue : null;
-    const isEnded = ended(client);
+    const isEnded = leftOut(client);
     let status = isProduct ? "product" : "none";
     let neededFee = null;
     if (rate !== null && target > 0) {
@@ -887,9 +890,17 @@ const CAPACITY_GUIDE = {
       if (!x || !y) return x ? -1 : y ? 1 : 0;   // unnamed rows last
       return x.localeCompare(y, undefined, { sensitivity: "base", numeric: true });
     };
+    const adhoc = state.clients.filter(isAdhoc).length;
+    $("adhocBtn").hidden = !adhoc;
+    $("adhocBtn").textContent = state.hideAdhoc ? `Show ad hoc (${adhoc})` : `Remove ad hoc (${adhoc})`;
+    $("adhocBtn").setAttribute("aria-pressed", !!state.hideAdhoc);
     const groups = SERVICES.map((x) => x.id).concat([""]).map((id) => ({
-      id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id).sort(byName)
+      id, items: state.clients.map((c, i) => ({ c, i })).filter((x) => serviceOf(x.c) === id && !(state.hideAdhoc && isAdhoc(x.c))).sort(byName)
     })).filter((g) => g.items.length);
+    if (!groups.length) {
+      els.rows.innerHTML = `<tr><td colspan="${COLS}" class="empty">Every client here is ad hoc. Click <strong>Show ad hoc</strong> to see them.</td></tr>`;
+      return;
+    }
     const heads = groups.length > 1 || groups[0].id !== "";
     const withNotes = state.clients.filter(noteShown);
     $("notesBtn").hidden = !withNotes.length;
@@ -942,7 +953,7 @@ const CAPACITY_GUIDE = {
   function forecastHtml() {
     const months = Array.from({ length: 12 }, (_, k) => nowIdx + k);
     const vals = months.map((i) => state.clients.reduce((t, c) => {
-      if (!activeIn(c, i)) return t;
+      if (!activeIn(c, i) || (state.hideAdhoc && isAdhoc(c))) return t;
       return t + num(c.fee) / freqMonths(c);
     }, 0));
     const max = Math.max(...vals, 1);
@@ -1434,6 +1445,13 @@ const CAPACITY_GUIDE = {
     save();
     renderRows();
     showFileMsg("Hidden notes and Xero figures are back.");
+  });
+  $("adhocBtn").addEventListener("click", () => {
+    state.hideAdhoc = !state.hideAdhoc;
+    save();
+    renderRows();
+    renderOutputs();
+    showFileMsg(state.hideAdhoc ? "Ad hoc clients are out of the table and all totals. Click Show ad hoc to bring them back." : "Ad hoc clients are back.");
   });
   $("catBtn").addEventListener("click", () => {
     const show = $("clientTable").classList.toggle("hide-cat") === false;
