@@ -8,8 +8,11 @@
 
   const SERVER = "Xero";
   const OWNER_PAY = /shareholder'?s? salar|owner'?s? (salary|wages|pay)|director'?s? (fees|salary)|drawings|proprietor/i;
-  const NOT_FEES = /subs|commission|affiliate|reimburs|travel|music|interest|other revenue/i;
+  const NOT_FEES = /affiliate|reimburs|travel|music|interest|other revenue/i;
   const COURSES = /course|programme|program|membership|product/i;
+  const SOFTWARE = /subs|subscription|commission|software|licen/i;
+  const SOFTWARE_COSTS = /subs|subscription|software|licen|xero|myob|reckon|quickbooks|commission/i;
+  const SVC_LABEL = { coaching: "Coaching", consulting: "Consulting", bookkeeping: "Bookkeeping", software: "Software", course: "Courses", other: "Other" };
 
   const $ = (id) => document.getElementById(id);
   const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
@@ -20,7 +23,7 @@
 
   // Saved per viewer: the calculator state plus this add-on's settings and last Xero pull
   let store = null;        // db document ref
-  let saved = { sync: { months: 3, feeCodes: null, ownerAccounts: null, hidden: [] }, xero: null };
+  let saved = { sync: { months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, xero: null };
   let mcp = null;
   let busy = false;
   let writeTimer = null;
@@ -64,6 +67,9 @@
           </label>
           <p class="table-note">Income accounts that count as client fees:</p>
           <div id="xeroFeeCodes" class="muted" style="font-size:.85rem;">Refresh to see your accounts.</div>
+          <h3 style="margin-top:14px;">Software costs</h3>
+          <p class="table-note" style="margin-top:0;">Cost of sales accounts for software subscriptions. Shared across your Software &amp; commissions clients by fee, as their other direct costs.</p>
+          <div id="xeroSoftCos" class="muted" style="font-size:.85rem;">Refresh to see your accounts.</div>
         </div>
         <div>
           <h3>Your own pay</h3>
@@ -125,14 +131,16 @@
   window.PPC.onChange = () => { persist(); renderYtd(); };
   window.PPC.onRestoreClient = (c) => {
     if (c && c.xeroContactId) {
-      saved.sync.hidden = (saved.sync.hidden || []).filter((h) => h.id !== c.xeroContactId);
+      const keys = [c.xeroKey, c.xeroContactId];
+      saved.sync.hidden = (saved.sync.hidden || []).filter((h) => !keys.includes(h.id));
       renderSettings();
     }
   };
   window.PPC.onRemoveClient = (c) => {
     if (!Array.isArray(saved.sync.hidden)) saved.sync.hidden = [];
-    if (c && c.source === "xero" && c.xeroContactId && !saved.sync.hidden.some((h) => h.id === c.xeroContactId)) {
-      saved.sync.hidden.push({ id: c.xeroContactId, name: c.name });
+    const key = c && (c.xeroKey || c.xeroContactId);
+    if (c && c.source === "xero" && key && !saved.sync.hidden.some((h) => h.id === key)) {
+      saved.sync.hidden.push({ id: key, name: c.name });
       renderSettings();
     }
   };
@@ -159,9 +167,10 @@
     const winEnd = new Date(today.getFullYear(), today.getMonth(), 0);           // last day of last month
     const winStart = new Date(today.getFullYear(), today.getMonth() - months, 1);
 
-    const [lastYear, ytd, chart] = await Promise.all([
+    const [lastYear, ytd, win, chart] = await Promise.all([
       call("get_profit_and_loss", { organisation_id: id, start_date: iso(lastStart), end_date: iso(lastEnd) }),
       call("get_profit_and_loss", { organisation_id: id, start_date: iso(fyStart), end_date: iso(today) }),
+      call("get_profit_and_loss", { organisation_id: id, start_date: iso(winStart), end_date: iso(winEnd) }),
       call("get_chart_of_accounts", { organisation_id: id })
     ]);
 
@@ -178,6 +187,9 @@
     // Keep only what the calculator uses, so the saved copy stays small
     const slimPnl = (r) => ({
       current_pnl: r.current_pnl,
+      cos_accounts: ((r.cost_of_sales_accounts && r.cost_of_sales_accounts.all_accounts) || [])
+        .filter((a) => num(a.current_balance) !== 0)
+        .map((a) => ({ account_name: a.account_name, current_balance: a.current_balance })),
       expense_accounts: { all_accounts: ((r.expense_accounts && r.expense_accounts.all_accounts) || [])
         .filter((a) => num(a.current_balance) !== 0)
         .map((a) => ({ account_name: a.account_name, current_balance: a.current_balance })) }
@@ -193,7 +205,7 @@
     slimInvoices.forEach((inv) => inv.line_items.forEach((l) => used.add(l.account_code)));
     return {
       orgId: id, orgName: org.name, fyStart: iso(fyStart), lastStart: iso(lastStart), lastEnd: iso(lastEnd),
-      winStart: iso(winStart), winEnd: iso(winEnd), months, lastYear: slimPnl(lastYear), ytd: slimPnl(ytd),
+      winStart: iso(winStart), winEnd: iso(winEnd), months, lastYear: slimPnl(lastYear), ytd: slimPnl(ytd), win: slimPnl(win),
       accounts: (chart.accounts || []).filter((a) => used.has(a.code)).map((a) => ({ code: a.code, name: a.name, type: a.type })),
       invoices: slimInvoices
     };
@@ -237,6 +249,7 @@
   // Which service an income account belongs to
   function serviceFromAccount(name) {
     if (COURSES.test(name)) return "course";
+    if (SOFTWARE.test(name)) return "software";
     if (/coach/i.test(name)) return "coaching";
     if (/consult|support|training|software|advis/i.test(name)) return "consulting";
     if (/bookkeep|accounts|payroll|compliance/i.test(name)) return "bookkeeping";
@@ -258,30 +271,31 @@
     x.invoices.forEach((inv) => {
       const cid = inv.contact && inv.contact.contact_id;
       if (!cid || hidden.has(cid)) return;
-      const lines = (inv.line_items || []).filter((l) => fee.has(l.account_code) && l.line_amount_net_base_currency != null);
-      if (!lines.length) return;
-      const c = by.get(cid) || { id: cid, name: inv.contact.name, total: 0, qty: 0, hourly: false, first: inv.invoice_date, last: inv.invoice_date, months: new Set(), bySvc: {} };
-      lines.forEach((l) => {
-        const amt = num(l.line_amount_net_base_currency);
-        c.total += amt;
+      (inv.line_items || []).forEach((l) => {
+        if (!fee.has(l.account_code) || l.line_amount_net_base_currency == null) return;
         const svc = serviceFromAccount(names.get(l.account_code) || "");
-        c.bySvc[svc] = (c.bySvc[svc] || 0) + amt;
+        const key = cid + ":" + svc;
+        if (hidden.has(key)) return;
+        const c = by.get(key) || { id: key, cid, svc, name: inv.contact.name, total: 0, qty: 0, hourly: false, first: inv.invoice_date, last: inv.invoice_date, months: new Set() };
+        c.total += num(l.line_amount_net_base_currency);
         const q = num(l.quantity);
         c.qty += q;
         if (l.quantity != null && q !== 1) c.hourly = true;
+        if (inv.invoice_date < c.first) c.first = inv.invoice_date;
+        if (inv.invoice_date > c.last) c.last = inv.invoice_date;
+        c.months.add(inv.invoice_date.slice(0, 7));
+        by.set(key, c);
       });
-      if (inv.invoice_date < c.first) c.first = inv.invoice_date;
-      if (inv.invoice_date > c.last) c.last = inv.invoice_date;
-      c.months.add(inv.invoice_date.slice(0, 7));
-      by.set(cid, c);
     });
+    const parts = new Map();
+    by.forEach((c) => { if (c.total > 0) parts.set(c.cid, (parts.get(c.cid) || 0) + 1); });
     return [...by.values()].filter((c) => c.total > 0).map((c) => {
       const f = new Date(c.first + "T00:00:00");
       const active = Math.max(1, Math.min(x.months, (end.getFullYear() - f.getFullYear()) * 12 + end.getMonth() - f.getMonth() + 1));
       const billed = c.months.size;
       const regular = billed >= 2 ? billed >= Math.ceil(active * 0.5) : active <= 1;
       const per = regular ? billed : x.months;
-      const type = Object.keys(c.bySvc).sort((a, b) => c.bySvc[b] - c.bySvc[a])[0] || "other";
+      const split = parts.get(c.cid) > 1;
       let note = "", warn = false;
       if (!regular) {
         note = `Ad hoc: billed ${money(c.total)} in ${billed} of the last ${x.months} months. Shown as a monthly average.`;
@@ -291,12 +305,20 @@
       } else if (billed < active) {
         note = `Averaged over the ${billed} months billed (not billed in ${active - billed}).`;
       }
+      if (split) note = (note ? note + " " : "") + `This row is the ${SVC_LABEL[c.svc].toLowerCase()} part of ${c.name}'s invoices.`;
       return {
-        id: c.id, name: c.name, type, note, noteWarn: warn,
+        id: c.id, cid: c.cid, name: split ? `${c.name} · ${SVC_LABEL[c.svc]}` : c.name, type: c.svc, note, noteWarn: warn,
         fee: Math.round(c.total / per),
-        hours: c.hourly ? Math.round(c.qty / per * 100) / 100 : ""
+        hours: c.hourly && c.svc !== "software" && c.svc !== "course" ? Math.round(c.qty / per * 100) / 100 : ""
       };
     }).sort((a, b) => b.fee - a.fee);
+  }
+
+  // Monthly software cost of sales, from the P&L for the same months as the fees
+  function softwareCost(x) {
+    if (!x.win || !x.win.cos_accounts) return null;
+    const pick = new Set(saved.sync.softwareCosts || []);
+    return x.win.cos_accounts.reduce((t, a) => t + (pick.has(a.account_name) ? num(a.current_balance) : 0), 0) / x.months;
   }
 
   // Merge Xero figures into the calculator, keeping what you've entered yourself
@@ -305,11 +327,19 @@
     if (!x) return;
     const s = window.PPC.getState();
     const prev = s.clients || [];
-    const byId = new Map(prev.filter((c) => c.xeroContactId).map((c) => [c.xeroContactId, c]));
+    const byKey = new Map(prev.filter((c) => c.xeroKey).map((c) => [c.xeroKey, c]));
+    const byContact = new Map(prev.filter((c) => c.xeroContactId && !c.xeroKey).map((c) => [c.xeroContactId, c]));
     const byName = new Map(prev.map((c) => [String(c.name || "").trim().toLowerCase(), c]));
     const changed = (mine, theirs) => mine !== undefined && mine !== "" && theirs !== undefined && String(mine) !== String(theirs);
-    const fresh = clientsFrom(x).map((xc) => {
-      const old = byId.get(xc.id) || byName.get(xc.name.toLowerCase()) || {};
+    const rows = clientsFrom(x);
+    const softFees = rows.filter((r) => r.type === "software").reduce((t, r) => t + r.fee, 0);
+    const softCost = softwareCost(x);
+    const fresh = rows.map((xc) => {
+      // Rows saved before clients were split by service match on the contact and their main service
+      const legacy = byContact.get(xc.cid);
+      const old = byKey.get(xc.id) || (legacy && (legacy.xeroType === xc.type || legacy.type === xc.type) ? legacy : null) || byName.get(xc.name.toLowerCase()) || {};
+      const xeroOther = xc.type === "software" && softCost !== null && softFees > 0 ? Math.round(softCost * xc.fee / softFees * 100) / 100 : undefined;
+      const youChangedOther = old.otherCosts !== undefined && old.otherCosts !== "" && String(old.otherCosts) !== String(old.xeroOtherCosts ?? "");
       const youChangedHours = old.hours !== undefined && old.hours !== "" && String(old.hours) !== String(old.xeroHours ?? "");
       const youChangedFee = old.xeroFee !== undefined && Math.round(num(old.fee)) !== Math.round(num(old.xeroFee));
       return {
@@ -318,10 +348,11 @@
         fee: youChangedFee ? old.fee : xc.fee, xeroFee: xc.fee, origFee: xc.fee, origLabel: "Xero",
         hours: youChangedHours ? old.hours : (xc.hours !== "" ? xc.hours : (old.hours ?? "")),
         xeroHours: xc.hours,
-        teamHours: old.teamHours ?? "", otherCosts: old.otherCosts ?? "", wip: old.wip ?? "",
+        teamHours: old.teamHours ?? "", wip: old.wip ?? "",
+        otherCosts: youChangedOther || xeroOther === undefined ? (old.otherCosts ?? "") : xeroOther, xeroOtherCosts: xeroOther,
         noReprice: !!old.noReprice,
         note: xc.note, noteWarn: xc.noteWarn,
-        source: "xero", xeroContactId: xc.id
+        source: "xero", xeroContactId: xc.cid, xeroKey: xc.id
       };
     });
     const freshNames = new Set(fresh.map((c) => c.name.toLowerCase()));
@@ -358,6 +389,14 @@
       saved.xero = x;
       if (!saved.sync.feeCodes) saved.sync.feeCodes = defaultFeeCodes(x);
       addCourseAccounts(x);
+      if (!saved.sync.softwareCosts && x.win) saved.sync.softwareCosts = x.win.cos_accounts.map((a) => a.account_name).filter((n) => SOFTWARE_COSTS.test(n));
+      if (!saved.sync.softwareAdded) {
+        // Subscription and commission income now counts, in its own group
+        const set = new Set(saved.sync.feeCodes || []);
+        invoiceAccounts(x).filter((a) => a.type === "REVENUE" && SOFTWARE.test(a.name)).forEach((a) => set.add(a.code));
+        saved.sync.feeCodes = [...set];
+        saved.sync.softwareAdded = true;
+      }
       if (!saved.sync.ownerAccounts) saved.sync.ownerAccounts = expenseLines(x).filter((n) => OWNER_PAY.test(n));
       applyXero();
       renderHeader();
@@ -387,6 +426,10 @@
       const fee = new Set(saved.sync.feeCodes || []);
       $("xeroFeeCodes").innerHTML = invoiceAccounts(x).map((a) =>
         `<label class="chk"><input type="checkbox" data-fee="${esc(a.code)}" ${fee.has(a.code) ? "checked" : ""}>${esc(a.code)} ${esc(a.name)}</label>`).join("") || "No invoice lines in this period.";
+      const soft = new Set(saved.sync.softwareCosts || []);
+      $("xeroSoftCos").innerHTML = x.win
+        ? (x.win.cos_accounts.map((a) => `<label class="chk"><input type="checkbox" data-softcos="${esc(a.account_name)}" ${soft.has(a.account_name) ? "checked" : ""}>${esc(a.account_name)} <span class="muted">(${money(num(a.current_balance) / x.months)}/month)</span></label>`).join("") || "No cost of sales in this period.")
+        : "Refresh to see your cost of sales.";
       const owner = new Set(saved.sync.ownerAccounts || []);
       $("xeroOwner").innerHTML = expenseLines(x).map((n) =>
         `<label class="chk"><input type="checkbox" data-owner="${esc(n)}" ${owner.has(n) ? "checked" : ""}>${esc(n)}</label>`).join("") || "No expenses last year.";
@@ -448,6 +491,12 @@
       saved.sync.feeCodes = [...set];
       applyXero(); persist();
     }
+    if (t.dataset.softcos !== undefined) {
+      const set = new Set(saved.sync.softwareCosts || []);
+      t.checked ? set.add(t.dataset.softcos) : set.delete(t.dataset.softcos);
+      saved.sync.softwareCosts = [...set];
+      applyXero(); persist();
+    }
     if (t.dataset.owner !== undefined) {
       const set = new Set(saved.sync.ownerAccounts || []);
       t.checked ? set.add(t.dataset.owner) : set.delete(t.dataset.owner);
@@ -475,7 +524,7 @@
           const snap = await store.get();
           if (snap.exists) {
             const d = snap.data();
-            saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, hidden: [] }, d.sync || {}), xero: d.xero || null };
+            saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, d.sync || {}), xero: d.xero || null };
             if (d.state) window.PPC.setState(JSON.parse(JSON.stringify(d.state)));
           }
         }
@@ -484,7 +533,7 @@
       }
     }
     if (!store) say("Your settings are kept in this browser only.", false);
-    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && c.xeroType === undefined)) {
+    if (saved.xero && (window.PPC.getState().clients || []).some((c) => c.source === "xero" && (c.xeroType === undefined || c.xeroKey === undefined))) {
       addCourseAccounts(saved.xero);
       applyXero();
       persist();

@@ -485,7 +485,7 @@ const CAPACITY_GUIDE = {
       <span class="status amber">Within 15% below</span>
       <span class="status red">More than 15% below</span>
     </div>
-    <p class="table-note"><strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses and programmes don't need hours.</p>
+    <p class="table-note"><strong>Team hours</strong> are the part of the total hours done by paid staff or contractors, costed at your team cost per hour. <strong>Other direct costs</strong> are monthly costs of serving that client, such as software subscriptions. Cost of sales = team hours × team cost per hour + other direct costs. <strong>WIP</strong> is work done but not yet billed, in dollars. It's spread over the months your fees and hours cover and counted in that client's effective rate. Courses, programmes and software don't need hours.</p>
   </section>
 
   <!-- Summary -->
@@ -548,6 +548,7 @@ const CAPACITY_GUIDE = {
     { id: "coaching", label: "Coaching" },
     { id: "consulting", label: "Consulting" },
     { id: "bookkeeping", label: "Bookkeeping" },
+    { id: "software", label: "Software & commissions" },
     { id: "course", label: "Courses & programmes" },
     { id: "other", label: "Other" }
   ];
@@ -668,7 +669,8 @@ const CAPACITY_GUIDE = {
     const wipMonthly = wip / Math.max(1, num(state.periodMonths) || 1);
     const revenue = fee + wipMonthly;
     const hours = num(client.hours);
-    const isProduct = client.type === "course";
+    // Courses and software are sold, not billed by time: no hours or rate check
+    const isProduct = client.type === "course" || client.type === "software";
     const rate = hours > 0 && !isProduct ? revenue / hours : null;
     const cost = num(client.teamHours) * num(state.teamCostRate) + num(client.otherCosts);
     const grossProfit = revenue - cost;
@@ -813,7 +815,8 @@ const CAPACITY_GUIDE = {
       reset.innerHTML = orig !== undefined && orig !== "" && Math.round(num(orig)) !== Math.round(num(c.fee))
         ? `<button type="button" class="link-btn reset-fee" data-reset-fee="${tr.dataset.i}" title="Use the ${escapeHtml(c.origLabel || "original")} figure again">↺ ${escapeHtml(c.origLabel || "Original")} ${money(num(orig))}</button>` : "";
       tr.querySelector('[data-out="rate"]').textContent = a.rate === null ? "—" : money(a.rate, 2);
-      tr.querySelector('[data-out="status"]').innerHTML = a.status === "none" ? '<span class="muted">—</span>' : `<span class="status ${a.status}">${STATUS_LABEL[a.status]}</span>`;
+      const label = a.status === "product" && c.type === "software" ? "Software" : STATUS_LABEL[a.status];
+      tr.querySelector('[data-out="status"]').innerHTML = a.status === "none" ? '<span class="muted">—</span>' : `<span class="status ${a.status}">${label}</span>`;
       tr.querySelector('[data-out="needed"]').innerHTML = a.neededFee === null
         ? '<span class="muted">—</span>'
         : `<span class="needed"${a.skipped ? ' style="text-decoration:line-through;opacity:.6;" title="Not repricing"' : ""}>${money(a.neededFee)}</span>`;
@@ -838,7 +841,7 @@ const CAPACITY_GUIDE = {
     const gpAnnual = annual - costAnnual;
     const margin = annual > 0 ? gpAnnual / annual : null;
     const pt = profitTarget();
-    const byService = SERVICES.filter((x) => x.id !== "course").map((x) => ({ x, g: serviceStats(x.id) })).filter((r) => r.g.rate !== null);
+    const byService = SERVICES.filter((x) => x.id !== "course" && x.id !== "software").map((x) => ({ x, g: serviceStats(x.id) })).filter((r) => r.g.rate !== null);
     const missingNote = t.missing ? `<div class="sub" style="color:var(--amber);font-weight:600;">${t.missing} client${t.missing === 1 ? " has" : "s have"} no hours entered</div>` : "";
 
     let html = `<div class="summary-grid">
