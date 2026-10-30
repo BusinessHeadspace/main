@@ -200,6 +200,10 @@ const CAPACITY_GUIDE = {
   .bar-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .8rem; color: var(--muted); }
   .bar-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
+  .data-note { font-size: .85rem; color: var(--navy); background: #E6F5F7; border-left: 4px solid var(--teal); padding: 6px 10px; border-radius: 6px; }
+  .file-msg { margin: -10px 0 18px; font-size: .85rem; color: var(--navy); }
+  .file-msg.error { color: var(--red); }
+
   .fine-print { font-size: .72rem; color: var(--muted); margin-top: 14px; }
   .print-only { display: none; }
 
@@ -238,14 +242,19 @@ const CAPACITY_GUIDE = {
     <div>
       <h1>Pricing &amp; Profit Calculator</h1>
       <p>Work out the revenue you need, then check which clients are getting you there.</p>
+      <p class="data-note" id="dataNote" hidden></p>
       <p class="print-only" id="printDate"></p>
     </div>
     <div class="toolbar no-print">
+      <button class="btn btn-outline" id="openBtn" type="button">Open file</button>
+      <input type="file" id="openFile" accept=".json,application/json" hidden>
+      <button class="btn btn-outline" id="saveBtn" type="button">Save to file</button>
       <button class="btn btn-outline" id="sampleBtn" type="button">Load sample data</button>
       <button class="btn btn-outline" id="clearBtn" type="button">Clear all</button>
       <button class="btn btn-gold" id="printBtn" type="button">Print / Save as PDF</button>
     </div>
   </header>
+  <p class="file-msg no-print" id="fileMsg" role="status" hidden></p>
 
   <!-- Settings -->
   <section class="card">
@@ -495,9 +504,10 @@ const CAPACITY_GUIDE = {
 
   // Totals across the client list (monthly figures)
   function clientTotals() {
-    const t = { revenue: 0, hours: 0, cost: 0, extra: 0, count: 0 };
+    const t = { revenue: 0, hours: 0, cost: 0, extra: 0, count: 0, missing: 0 };
     state.clients.forEach((c) => {
       const a = analyse(c);
+      if (a.fee > 0 && !(a.hours > 0)) t.missing++;
       t.revenue += a.fee;
       t.hours += a.hours;
       t.cost += a.cost;
@@ -574,16 +584,19 @@ const CAPACITY_GUIDE = {
   }
 
   function renderSummary() {
-    let monthly = 0, hours = 0, extraMonthly = 0, costMonthly = 0;
+    let monthly = 0, hours = 0, extraMonthly = 0, costMonthly = 0, hoursRevenue = 0, missing = 0;
     state.clients.forEach((c) => {
       const a = analyse(c);
       monthly += a.fee;
       costMonthly += a.cost;
       hours += a.hours;
+      if (a.hours > 0) hoursRevenue += a.fee;
+      else if (a.fee > 0) missing++;
       if (a.neededFee !== null) extraMonthly += a.neededFee - a.fee;
     });
     const annual = monthly * 12;
-    const avgRate = hours > 0 ? monthly / hours : null;
+    const avgRate = hours > 0 ? hoursRevenue / hours : null;
+    const missingNote = missing ? `<div class="sub" style="color:var(--amber);font-weight:600;">${missing} client${missing === 1 ? " has" : "s have"} no hours entered</div>` : "";
     const extraAnnual = extraMonthly * 12;
     const costAnnual = costMonthly * 12;
     const gpAnnual = annual - costAnnual;
@@ -595,8 +608,8 @@ const CAPACITY_GUIDE = {
       <div class="stat"><div class="label">Annual revenue</div><div class="value">${money(annual)}</div></div>
       <div class="stat navy"><div class="label">Cost of sales / year</div><div class="value">${money(costAnnual)}</div><div class="sub">${money(costMonthly)} / month</div></div>
       <div class="stat navy"><div class="label">Gross profit / year</div><div class="value">${money(gpAnnual)}</div><div class="sub">${margin === null ? "&nbsp;" : pct(margin) + " gross margin"}</div></div>
-      <div class="stat"><div class="label">Total hours / month</div><div class="value">${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div><div class="sub">${(hours * 12).toLocaleString(undefined, { maximumFractionDigits: 0 })} hours / year</div></div>
-      <div class="stat teal"><div class="label">Average effective rate</div><div class="value">${avgRate === null ? "—" : money(avgRate, 2)}</div>${num(state.targetRate) > 0 ? `<div class="sub">Target: ${money(num(state.targetRate), 2)}</div>` : ""}</div>
+      <div class="stat"><div class="label">Total hours / month</div><div class="value">${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div><div class="sub">${(hours * 12).toLocaleString(undefined, { maximumFractionDigits: 0 })} hours / year</div>${missingNote}</div>
+      <div class="stat teal"><div class="label">Average effective rate</div><div class="value">${avgRate === null ? "—" : money(avgRate, 2)}</div>${num(state.targetRate) > 0 ? `<div class="sub">Target: ${money(num(state.targetRate), 2)}</div>` : ""}${missing ? `<div class="sub">Clients with hours entered only</div>` : ""}</div>
       <div class="stat highlight"><div class="label">Extra from repricing</div><div class="value">${money(extraAnnual)}</div><div class="sub">per year (revenue and gross profit) if all under-target clients are repriced</div></div>`;
 
     if (pt) {
@@ -736,7 +749,7 @@ const CAPACITY_GUIDE = {
     const avgFee = t.count ? t.revenue / t.count : 0;
     const newClients = remaining > 0 && avgFee > 0 ? Math.ceil(remaining / (avgFee * 12)) : 0;
     const hoursYr = t.hours * 12;
-    const rateNeeded = hoursYr > 0 ? r.revenue / hoursYr : null;
+    const rateNeeded = hoursYr > 0 && !t.missing ? r.revenue / hoursYr : null;
     const clientMargin = (t.revenue - t.cost) / t.revenue;
 
     let html = `<div class="bar-wrap">
@@ -752,7 +765,9 @@ const CAPACITY_GUIDE = {
     if (rateNeeded !== null) {
       html += `<div class="stat teal"><div class="label">Rate needed at your current hours</div><div class="value">${money(rateNeeded, 2)}</div><div class="sub">Your clients take ${hrs(hoursYr)} hrs a year. To hit the target without adding hours, this is the average you'd need.</div></div>`;
     }
-    if (r.hours !== null) {
+    if (t.missing) {
+      html += `<div class="stat teal"><div class="label">Rate needed at your current hours</div><div class="value">—</div><div class="sub">${t.missing} client${t.missing === 1 ? " has" : "s have"} no hours entered. Add hours on the Client pricing tab to see this.</div></div>`;
+    } else if (r.hours !== null) {
       html += `<div class="stat"><div class="label">Hours: now vs needed</div><div class="value">${hrs(hoursYr)} / ${hrs(r.hours)}</div><div class="sub">hours a year across your team</div></div>`;
     }
     html += `<div class="stat navy"><div class="label">Clients' gross margin</div><div class="value">${pct(clientMargin)}</div><div class="sub">${clientMargin >= r.gpPct ? "At or above" : "Below"} your ${pct(r.gpPct)} target${clientMargin < r.gpPct ? ". Review team hours and direct costs on the Client pricing tab." : ""}</div></div>
@@ -771,6 +786,8 @@ const CAPACITY_GUIDE = {
     els.targetRate.value = state.targetRate;
     els.currency.value = state.currency;
     els.teamCostRate.value = state.teamCostRate ?? "";
+    $("dataNote").hidden = !state.dataNote;
+    $("dataNote").textContent = state.dataNote || "";
     const p = state.pt;
     $(p.basis === "month" ? "ptBasisMonth" : "ptBasisYear").checked = true;
     ["netProfit", "taxRate", "overheads", "gpPct", "people", "weeks"].forEach((f) => {
@@ -879,6 +896,53 @@ const CAPACITY_GUIDE = {
     state = { targetRate: "", currency: state.currency, teamCostRate: "", pt: emptyPt(), clients: [] };
     save();
     renderAll();
+  });
+
+  // Save / open a data file
+  function showFileMsg(text, isError) {
+    const el = $("fileMsg");
+    el.textContent = text;
+    el.classList.toggle("error", !!isError);
+    el.hidden = false;
+    clearTimeout(showFileMsg.t);
+    showFileMsg.t = setTimeout(() => { el.hidden = true; }, 6000);
+  }
+
+  $("saveBtn").addEventListener("click", () => {
+    const payload = { app: "pricing-profit-calculator", version: 1, savedAt: new Date().toISOString(), data: state };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pricing-profit-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    showFileMsg("Saved " + a.download + " to your downloads.");
+  });
+
+  $("openBtn").addEventListener("click", () => $("openFile").click());
+  $("openFile").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        const d = parsed && parsed.data ? parsed.data : parsed;
+        if (!d || !Array.isArray(d.clients)) throw new Error("No client list");
+        state = Object.assign({ targetRate: "", currency: "NZD", teamCostRate: "", pt: emptyPt(), clients: [] }, d);
+        state.pt = Object.assign(emptyPt(), d.pt || {});
+        if (!LOCALES[state.currency]) state.currency = "NZD";
+        save();
+        renderAll();
+        showFileMsg("Opened " + file.name + ".");
+      } catch (err) {
+        showFileMsg("That file couldn't be opened. Choose a .json file saved from this calculator.", true);
+      }
+      e.target.value = "";
+    };
+    reader.readAsText(file);
   });
 
   $("printBtn").addEventListener("click", () => window.print());
