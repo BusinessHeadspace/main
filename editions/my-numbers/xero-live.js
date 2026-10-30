@@ -24,7 +24,7 @@
 
   // Saved per viewer: the calculator state plus this add-on's settings and last Xero pull
   let store = null;        // db document ref
-  let saved = { sync: { months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, xero: null };
+  let saved = { sync: { months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, xero: null, dash: {} };
   let mcp = null;
   let busy = false;
   let writeTimer = null;
@@ -133,7 +133,7 @@
     const savedAt = Date.now();
     lastSaved = savedAt;
     try {
-      await store.set({ state: window.PPC.getState(), sync: saved.sync, xero: saved.xero, savedAt, tab: TAB });
+      await store.set({ state: window.PPC.getState(), sync: saved.sync, xero: saved.xero, dash: saved.dash, savedAt, tab: TAB });
     } catch (e) {
       dirty = true;
       say("Your changes couldn't be saved to your account just now. They're still kept in this browser.", true);
@@ -157,11 +157,11 @@
   function applyRemote(d) {
     if (dirty || writing) return;              // this tab's own newer change wins
     lastSaved = d.savedAt;
-    saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, d.sync || {}), xero: d.xero || null };
+    saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, d.sync || {}), xero: d.xero || null, dash: d.dash || {} };
     if (d.state) window.PPC.setState(JSON.parse(JSON.stringify(d.state)));
     dirty = false;                             // setState saved locally; nothing new to write
     clearTimeout(writeTimer);
-    renderHeader(); renderSettings(); renderYtd();
+    renderHeader(); renderSettings(); renderYtd(); notify();
   }
   function onRemote(snap) {
     if (!snap.exists) return;
@@ -176,7 +176,24 @@
     if (pendingRemote && !(el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))) { const d = pendingRemote; pendingRemote = null; applyRemote(d); }
   }, 0));
 
-  window.PPC.onChange = () => { persist(); renderYtd(); };
+  window.PPC.onChange = () => { persist(); renderYtd(); notify(); };
+
+  // For other add-ons (the Monthly Dashboard): the last Xero pull, your Xero settings,
+  // and a place to keep their own entries, saved with everything else
+  let loaded = false;
+  const listeners = [];
+  function notify() { listeners.forEach((fn) => { try { fn(); } catch (e) { /* one add-on can't break another */ } }); }
+  window.PPC.live = {
+    xero: () => saved.xero,
+    sync: () => saved.sync,
+    dash: () => saved.dash || (saved.dash = {}),
+    save: () => persist(),
+    loaded: () => loaded,
+    connected: () => !!mcp,
+    refresh: () => refresh(),
+    onUpdate: (fn) => listeners.push(fn),
+    serviceFromAccount: (name) => (NOT_FEES.test(name) ? "other" : serviceFromAccount(name))
+  };
   window.PPC.onClientChange = (c, field) => {
     if (field === "freq" && c && c.source === "xero" && saved.xero) { applyXero(); persist(); }
   };
@@ -225,10 +242,25 @@
       call("get_chart_of_accounts", { organisation_id: id })
     ]);
 
+    // A P&L for each month of this financial year so far (this month to today), a few at a time
+    const monthStarts = [];
+    for (let d = new Date(fyStart); d <= today; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) monthStarts.push(d);
+    const monthly = [];
+    for (let i = 0; i < monthStarts.length; i += 4) {
+      const batch = monthStarts.slice(i, i + 4);
+      const res = await Promise.all(batch.map((d) => {
+        const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        return call("get_profit_and_loss", { organisation_id: id, start_date: iso(d), end_date: iso(end < today ? end : today) });
+      }));
+      res.forEach((r, k) => monthly.push(slimMonth(r, batch[k], today)));
+    }
+
+    // Invoices for the fee period and this financial year so far (the dashboard counts clients billed each month)
+    const invStart = winStart < fyStart ? winStart : fyStart;
     const invoices = [];
-    for (let page = 1; page <= 40; page++) {
+    for (let page = 1; page <= 60; page++) {
       const res = await call("get_invoices", {
-        organisation_id: id, issued_date_start: iso(winStart), issued_date_end: iso(winEnd),
+        organisation_id: id, issued_date_start: iso(invStart), issued_date_end: iso(today),
         include_line_items: true, page
       });
       invoices.push(...(res.invoices || []));
@@ -266,7 +298,24 @@
       orgId: id, orgName: org.name, fyStart: iso(fyStart), lastStart: iso(lastStart), lastEnd: iso(lastEnd),
       winStart: iso(winStart), winEnd: iso(winEnd), months, lastYear: slimPnl(lastYear), ytd: slimPnl(ytd), win: slimPnl(win),
       accounts: (chart.accounts || []).filter((a) => used.has(a.code)).map((a) => ({ code: a.code, name: a.name, type: a.type })),
-      invoices: slimInvoices, repeating
+      invoices: slimInvoices, repeating, monthly
+    };
+  }
+
+  // One month's P&L, kept small: totals plus each account with a balance
+  function slimMonth(r, start, today) {
+    const accts = (g) => {
+      const out = {};
+      ((r[g] && r[g].all_accounts) || []).forEach((a) => { if (num(a.current_balance) !== 0) out[a.account_name] = num(a.current_balance); });
+      return out;
+    };
+    const p = r.current_pnl || {};
+    const end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+    return {
+      ym: iso(start).slice(0, 7), partial: end > today,
+      income: num(p.total_income), cos: num(p.total_cost_of_sales), other: num(p.total_other_income),
+      expenses: num(p.total_expenses), net: num(p.net_profit),
+      incomeBy: accts("income_accounts"), cosBy: accts("cost_of_sales_accounts"), expBy: accts("expense_accounts")
     };
   }
 
@@ -327,6 +376,7 @@
     const lastMonth = x.winEnd.slice(0, 7);
     const by = new Map();
     x.invoices.forEach((inv) => {
+      if (inv.invoice_date < x.winStart || inv.invoice_date > x.winEnd) return;
       const cid = inv.contact && inv.contact.contact_id;
       if (!cid) return;
       (inv.line_items || []).forEach((l) => {
@@ -516,6 +566,7 @@
       renderHeader();
       renderSettings();
       renderYtd();
+      notify();
       persist();
       say(`Refreshed. ${x.invoices.length} invoices read from ${x.orgName}.`);
     } catch (err) {
@@ -615,7 +666,7 @@
       const set = new Set(saved.sync.ownerAccounts || []);
       t.checked ? set.add(t.dataset.owner) : set.delete(t.dataset.owner);
       saved.sync.ownerAccounts = [...set];
-      applyXero(); renderYtd(); persist();
+      applyXero(); renderYtd(); notify(); persist();
     }
   });
   card.addEventListener("click", (e) => {
@@ -638,7 +689,7 @@
           const snap = await store.get();
           if (snap.exists) {
             const d = snap.data();
-            saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, d.sync || {}), xero: d.xero || null };
+            saved = { sync: Object.assign({ months: 3, feeCodes: null, ownerAccounts: null, softwareCosts: null, hidden: [] }, d.sync || {}), xero: d.xero || null, dash: d.dash || {} };
             if (d.state) window.PPC.setState(JSON.parse(JSON.stringify(d.state)));
             lastSaved = d.savedAt || 0;
             dirty = false;
@@ -662,5 +713,7 @@
     renderHeader();
     renderSettings();
     renderYtd();
+    loaded = true;
+    notify();
   })();
 })();

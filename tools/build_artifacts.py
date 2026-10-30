@@ -6,8 +6,9 @@ Writes two files to dist/ (not committed):
   dist/client.html      Client edition: the calculator with Xero report import,
                         opening on sample data.
   dist/my-numbers.html  Private edition: the calculator plus the live Xero add-on
-                        in editions/my-numbers/xero-live.js. Publish it with the
-                        mcp (Xero), db and user capabilities.
+                        (editions/my-numbers/xero-live.js) and the Monthly
+                        Dashboard (editions/my-numbers/dashboard.js). Publish it
+                        with the mcp (Xero), db and user capabilities.
 
 The artifact viewer supplies its own <head>, blocks print dialogs, pop-up
 confirmations and downloads, so those parts of index.html are adapted here.
@@ -95,8 +96,10 @@ def my_numbers(src):
     s, n = re.subn(r'  \$\("sampleBtn"\)\.addEventListener\("click", \(\) => \{.*?renderAll\(\);\n  \}\);\n', '', s, flags=re.S)
     if n != 1:
         raise SystemExit("build_artifacts: sample handler not found")
-    addon = (ROOT / "editions/my-numbers/xero-live.js").read_text()
-    return s + "<script>\n" + addon + "</script>\n"
+    # The live Xero add-on, then the Monthly Dashboard, which builds on it
+    for name in ("xero-live.js", "dashboard.js"):
+        s += "<script>\n" + (ROOT / "editions/my-numbers" / name).read_text() + "</script>\n"
+    return s
 
 
 def main():

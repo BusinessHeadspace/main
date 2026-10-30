@@ -1378,9 +1378,10 @@ const CAPACITY_GUIDE = {
     renderOutputs();
   });
 
-  // Tabs
-  const TABS = ["profit-target", "client-pricing"];
+  // Tabs (read from the page each time, so an edition add-on can add its own)
+  const tabNames = () => [...document.querySelectorAll(".tabs .tab")].map((b) => b.dataset.tab);
   function showTab(name, focus) {
+    const TABS = tabNames();
     if (!TABS.includes(name)) name = TABS[0];
     TABS.forEach((t) => {
       const on = t === name;
@@ -1390,18 +1391,21 @@ const CAPACITY_GUIDE = {
     });
     if (focus) $("tab-" + name).focus();
   }
-  document.querySelectorAll(".tab").forEach((b) => {
-    b.addEventListener("click", () => {
-      showTab(b.dataset.tab);
-      try { history.replaceState(null, "", "#" + b.dataset.tab); } catch (e) { location.hash = b.dataset.tab; }
-    });
-    b.addEventListener("keydown", (e) => {
-      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-      const i = TABS.indexOf(b.dataset.tab) + (e.key === "ArrowRight" ? 1 : -1);
-      const next = TABS[(i + TABS.length) % TABS.length];
-      showTab(next, true);
-      try { history.replaceState(null, "", "#" + next); } catch (err) { /* ignore */ }
-    });
+  const tabNav = document.querySelector(".tabs");
+  tabNav.addEventListener("click", (e) => {
+    const b = e.target.closest(".tab");
+    if (!b) return;
+    showTab(b.dataset.tab);
+    try { history.replaceState(null, "", "#" + b.dataset.tab); } catch (err) { location.hash = b.dataset.tab; }
+  });
+  tabNav.addEventListener("keydown", (e) => {
+    const b = e.target.closest(".tab");
+    if (!b || (e.key !== "ArrowRight" && e.key !== "ArrowLeft")) return;
+    const TABS = tabNames();
+    const i = TABS.indexOf(b.dataset.tab) + (e.key === "ArrowRight" ? 1 : -1);
+    const next = TABS[(i + TABS.length) % TABS.length];
+    showTab(next, true);
+    try { history.replaceState(null, "", "#" + next); } catch (err) { /* ignore */ }
   });
   window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
   els.teamCostRate.addEventListener("input", () => { state.teamCostRate = els.teamCostRate.value; save(); renderOutputs(); });
@@ -2135,6 +2139,8 @@ const CAPACITY_GUIDE = {
     setState: (d) => loadData(d),
     money: (v, d) => money(v, d),
     showMessage: (text, isError) => showFileMsg(text, isError),
+    profitTarget: () => profitTarget(),
+    showTab: (name) => showTab(name),
     onChange: null,
     onRemoveClient: null
   };
